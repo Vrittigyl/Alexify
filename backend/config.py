@@ -128,6 +128,26 @@ class Settings(BaseSettings):
     CIRCUIT_BREAKER_WINDOW_SECS: int = 60
     CIRCUIT_BREAKER_PROBE_INTERVAL_SECS: int = 30
 
+    # ── Twilio ────────────────────────────────────────────
+    # Set twilio_enabled=True + fill credentials to activate real dispatch.
+    # TWILIO_FROM_WHATSAPP must be "whatsapp:+14155238886" (sandbox) or your approved number.
+    # MEMBER_PHONE_MAP is a JSON object mapping member_id → E.164 phone number,
+    # e.g. '{"mbr_papa_003": "+919876543210", "mbr_mama_001": "+919876543211"}'
+    twilio_enabled: bool = Field(default=False, alias="TWILIO_ENABLED")
+    twilio_account_sid: str = Field(default="", alias="TWILIO_ACCOUNT_SID")
+    twilio_auth_token: str = Field(default="", alias="TWILIO_AUTH_TOKEN")
+    twilio_from_whatsapp: str = Field(default="whatsapp:+14155238886", alias="TWILIO_FROM_WHATSAPP")
+    twilio_from_sms: str = Field(default="", alias="TWILIO_FROM_SMS")
+    member_phone_map_json: str = Field(default="{}", alias="MEMBER_PHONE_MAP")
+
+    @property
+    def member_phone_map(self) -> dict[str, str]:
+        import json
+        try:
+            return json.loads(self.member_phone_map_json)
+        except Exception:
+            return {}
+
     # ── Notification ──────────────────────────────────────
     NOTIFICATION_RATE_LIMIT_COUNT: int = 3       # max per member per window
     NOTIFICATION_RATE_LIMIT_WINDOW_SECS: int = 600  # 10 minutes

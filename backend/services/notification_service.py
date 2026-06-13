@@ -132,14 +132,89 @@ class NotificationService:
 
     def _simulate_dispatch(self, notification: Notification, formatted: str) -> None:
         """
-        Simulate sending via voice/mobile channel.
-        In production: call Alexa TTS / Firebase FCM / WhatsApp API.
+        Dispatch notification via Twilio (WhatsApp / SMS) when TWILIO_ENABLED=true.
+        Falls back to structured log for:
+          - ALEXA_VOICE / MOBILE_PUSH / VOICE_AND_MOBILE  (separate integrations)
+          - Any channel when Twilio is disabled or a phone number is missing
         """
-        channel = notification.channel.value if notification.channel else "mobile"
+        if settings.twilio_enabled:
+            self._twilio_dispatch(notification, formatted)
+        else:
+            channel = notification.channel.value if notification.channel else "mobile"
+            for member_id in notification.target_member_ids:
+                logger.debug(
+                    f"  [SIM] {channel.upper()} -> {member_id}: {formatted[:80]}..."
+                )
+
+    def _twilio_dispatch(self, notification: Notification, formatted: str) -> None:
+        """Send real messages via Twilio. Called only when TWILIO_ENABLED=true."""
+        try:
+            from twilio.rest import Client
+            from twilio.base.exceptions import TwilioRestException
+        except ImportError:
+            logger.error("Twilio package not installed — run: pip install twilio==9.3.5")
+            return
+
+        client = Client(settings.twilio_account_sid, settings.twilio_auth_token)
+        phone_map = settings.member_phone_map
+        channel = notification.channel
+
         for member_id in notification.target_member_ids:
-            logger.debug(
-                f"  [SIM] {channel.upper()} -> {member_id}: {formatted[:80]}..."
-            )
+            to_phone = phone_map.get(member_id)
+            if not to_phone:
+                logger.warning(
+                    f"NotificationService: no phone number for member={member_id} "
+                    f"— add to MEMBER_PHONE_MAP in .env"
+                )
+                continue
+
+            try:
+                if channel in (
+                    NotificationChannel.WHATSAPP,
+                    NotificationChannel.VOICE_AND_MOBILE,
+                ):
+                    msg = client.messages.create(
+                        from_=settings.twilio_from_whatsapp,
+                        to=f"whatsapp:{to_phone}",
+                        body=formatted,
+                    )
+                    logger.info(
+                        f"NotificationService: WhatsApp sent to {member_id} "
+                        f"({to_phone}) sid={msg.sid}"
+                    )
+
+                if channel in (
+                    NotificationChannel.SMS,
+                    NotificationChannel.MOBILE_PUSH,  # fallback until FCM is wired
+                ):
+                    if not settings.twilio_from_sms:
+                        logger.warning(
+                            "NotificationService: TWILIO_FROM_SMS not set — "
+                            f"skipping SMS for {member_id}"
+                        )
+                        continue
+                    msg = client.messages.create(
+                        from_=settings.twilio_from_sms,
+                        to=to_phone,
+                        body=formatted,
+                    )
+                    logger.info(
+                        f"NotificationService: SMS sent to {member_id} "
+                        f"({to_phone}) sid={msg.sid}"
+                    )
+
+                if channel == NotificationChannel.ALEXA_VOICE:
+                    # Alexa TTS is a separate Alexa Skills Kit integration
+                    logger.debug(
+                        f"  [VOICE] Alexa TTS not wired yet -> {member_id}: {formatted[:80]}..."
+                    )
+
+            except TwilioRestException as e:
+                logger.error(
+                    f"NotificationService: Twilio error for {member_id} "
+                    f"code={e.code} msg={e.msg}"
+                )
+                notification.error = f"twilio_error:{e.code}"
 
     async def _write_notification_log(self, notification: Notification, formatted: str) -> None:
         """Write notification record to ActionLog."""
