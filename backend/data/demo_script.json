@@ -11,9 +11,9 @@
       "flow_rate_lpm": 18.5,
       "timestamp": "2024-01-15T08:32:00+05:30"
     },
-    "expected_route": "RULE_ENGINE",
+    "expected_route": "SUPPRESS",
     "expected_rule": null,
-    "notes": "No rule fires yet — tank is low. Just ingested and logged."
+    "notes": "No rule fires yet — tank is low. Stage1 field-check correctly suppresses."
   },
   {
     "t_seconds": 15,
@@ -59,9 +59,9 @@
       "temperature_c": 100,
       "timestamp": "2024-01-15T11:05:00+05:30"
     },
-    "expected_route": "RULE_ENGINE",
+    "expected_route": "SUPPRESS",
     "expected_rule": null,
-    "notes": "No rule fires — cooker just started. Pattern engine may observe."
+    "notes": "No rule fires — cooker just started (whistle_count=0, threshold=5). Correctly suppressed."
   },
   {
     "t_seconds": 70,
