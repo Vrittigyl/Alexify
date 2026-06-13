@@ -21,7 +21,7 @@ from typing import Any
 
 from config import settings
 from db.dynamo_client import get_table
-from rule_engine import RuleRegistry
+from engines.rule_engine import RuleRegistry
 from schemas import NormalizedEvent, RTEDecision
 from schemas.enums import ConfidenceBand, EventType, RouteDecision
 

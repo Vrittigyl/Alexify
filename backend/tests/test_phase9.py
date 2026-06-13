@@ -48,7 +48,7 @@ def make_event(
 
 class TestPresenceService:
     def setup_method(self):
-        from presence_service import PresenceService
+        from services.presence_service import PresenceService
         self.svc = PresenceService(ttl_secs=2)  # short TTL for tests
 
     def test_update_and_retrieve(self):
@@ -82,7 +82,7 @@ class TestPresenceService:
         assert removed >= 1
 
     def test_home_member_ids(self):
-        svc2 = __import__("presence_service").PresenceService(ttl_secs=30)
+        svc2 = __import__("services.presence_service", fromlist=["PresenceService"]).PresenceService(ttl_secs=30)
         svc2.update(HH_ID, "mbr_dadaji_001", is_home=True)
         svc2.update(HH_ID, "mbr_rohan_005", is_home=False)
         home = svc2.get_home_member_ids(HH_ID)
@@ -96,8 +96,8 @@ class TestPresenceService:
 
 class TestContextEngine:
     def setup_method(self):
-        from context_engine import ContextEngine
-        from presence_service import PresenceService
+        from services.context_engine import ContextEngine
+        from services.presence_service import PresenceService
         self.presence = PresenceService(ttl_secs=60)
         self.presence.update(HH_ID, "mbr_dadaji_001", room_id="bedroom", is_home=True)
         self.engine = ContextEngine(presence=self.presence)
@@ -128,7 +128,7 @@ class TestContextEngine:
         assert ":" in ctx.ist_time  # HH:MM format
 
     def test_context_has_day_of_week(self):
-        from context_engine import _DAY_NAMES
+        from services.context_engine import _DAY_NAMES
         event = make_event()
         ctx = self.engine.build(event, HH_ID)
         assert ctx.day_of_week in _DAY_NAMES
@@ -140,7 +140,7 @@ class TestContextEngine:
 
 class TestEventBatcher:
     def setup_method(self):
-        from event_batcher import EventBatcher
+        from services.event_batcher import EventBatcher
         self.batcher = EventBatcher(window_mins=1, max_batch_size=5)
 
     def test_add_returns_true_for_new_event(self):
@@ -198,8 +198,8 @@ class TestEventBatcher:
 
 class TestContextBuilder:
     def setup_method(self):
-        from bedrock_layer import ContextBuilder
-        from presence_service import PresenceService
+        from services.bedrock_layer import ContextBuilder
+        from services.presence_service import PresenceService
         self.builder = ContextBuilder()
         self.ctx = HouseholdContext(
             household_id=HH_ID,
@@ -257,7 +257,7 @@ class TestContextBuilder:
 
 class TestBedrockCircuitBreaker:
     def setup_method(self):
-        from bedrock_layer import BedrockCircuitBreaker
+        from services.bedrock_layer import BedrockCircuitBreaker
         # Use short thresholds for testing
         self.cb = BedrockCircuitBreaker()
         self.cb._failure_threshold = 3
@@ -312,7 +312,7 @@ class TestBedrockCircuitBreaker:
 
 class TestBedrockLayerMock:
     def setup_method(self):
-        from bedrock_layer import BedrockLayer, ContextBuilder
+        from services.bedrock_layer import BedrockLayer, ContextBuilder
         self.layer = BedrockLayer(mock_mode=True)
         self.builder = ContextBuilder()
         self.ctx = HouseholdContext(
@@ -357,11 +357,11 @@ class TestBedrockLayerMock:
         assert resp.total_tokens > 0
 
     def test_circuit_open_returns_empty_response(self):
-        from bedrock_layer import BedrockCircuitBreaker
+        from services.bedrock_layer import BedrockCircuitBreaker
         cb = BedrockCircuitBreaker()
         cb._failure_threshold = 1
         cb.record_failure(HH_ID)
-        layer = __import__("bedrock_layer").BedrockLayer(circuit_breaker=cb, mock_mode=True)
+        layer = __import__("services.bedrock_layer", fromlist=["BedrockLayer"]).BedrockLayer(circuit_breaker=cb, mock_mode=True)
         bc = self._build_ctx("guest_arrival")
         resp = layer.invoke(bc, HH_ID)
         assert len(resp.actions) == 0
@@ -379,7 +379,7 @@ class TestBedrockLayerMock:
 
 class TestPatternEngine:
     def setup_method(self):
-        from pattern_engine import PatternEngine
+        from services.pattern_engine import PatternEngine
         self.engine = PatternEngine()
 
     def test_load_returns_pattern_records(self):
@@ -426,7 +426,7 @@ class TestPatternEngine:
 
 class TestMetricsService:
     def setup_method(self):
-        from metrics_service import MetricsService
+        from services.metrics_service import MetricsService
         self.svc = MetricsService(HH_ID)
 
     def test_initial_state_zero(self):

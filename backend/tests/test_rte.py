@@ -22,14 +22,14 @@ Scenario map:
 import pytest
 from schemas import NormalizedEvent
 from schemas.enums import DeviceType, EventType, RouteDecision
-from rte import (
+from engines.rte import (
     RTE,
     Stage1_RuleRegistryCheck,
     Stage2_PatternPromotionCheck,
     Stage3_ComplexityScorer,
     Stage4_Default,
 )
-from rule_engine import RuleRegistry
+from engines.rule_engine import RuleRegistry
 
 HH_ID = "hh_xk92p_sharma"
 

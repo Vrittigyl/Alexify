@@ -20,7 +20,7 @@ from typing import Any, Optional
 from config import settings
 from db.dynamo_client import get_table
 from graph_repository import GraphRepository
-from presence_service import PresenceService
+from services.presence_service import PresenceService
 from schemas.intelligence import HouseholdContext, MemberPresence
 
 logger = logging.getLogger(__name__)

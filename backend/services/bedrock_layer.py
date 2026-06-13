@@ -193,7 +193,7 @@ class BedrockCircuitBreaker:
         if not household_id:
             return
         try:
-            from notification_service import NotificationService  # type: ignore
+            from services.notification_service import NotificationService  # type: ignore
             ns = NotificationService()
             ns.notify_bedrock_degradation(household_id)
         except ImportError:

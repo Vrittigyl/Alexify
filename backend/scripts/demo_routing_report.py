@@ -11,8 +11,8 @@ import time
 from pathlib import Path
 from schemas import NormalizedEvent
 from schemas.enums import DeviceType, EventType
-from rte import RTE
-from rule_engine import RuleRegistry
+from engines.rte import RTE
+from engines.rule_engine import RuleEngine, RuleRegistry
 from graph_repository import GraphRepository
 
 HH_ID = "hh_xk92p_sharma"

@@ -13,7 +13,7 @@ from adapters.pressure_cooker_adapter import PressureCookerAdapter
 from adapters.television_adapter import TelevisionAdapter
 from adapters.smart_fridge_adapter import SmartFridgeAdapter
 from adapters.adapter_registry import get_adapter, registered_types
-from event_ingestion import ingest, ingest_life_event, _dedup_cache
+from engines.event_ingestion import ingest, ingest_life_event, _dedup_cache
 
 
 HH_ID = "hh_xk92p_sharma"

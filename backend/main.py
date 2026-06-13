@@ -51,23 +51,23 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from action_planner import ActionPlanner
-from bedrock_layer import BedrockLayer, BedrockCircuitBreaker, ContextBuilder
+from services.action_planner import ActionPlanner
+from services.bedrock_layer import BedrockLayer, BedrockCircuitBreaker, ContextBuilder
 from config import settings
-from context_engine import ContextEngine
+from services.context_engine import ContextEngine
 from db.dynamo_client import health_check
 from db.seed_dynamo import run_full_seed
-from device_command_bus import DeviceCommandBus
-from event_batcher import EventBatcher
+from services.device_command_bus import DeviceCommandBus
+from services.event_batcher import EventBatcher
 from event_simulator import EventSimulator
 from graph_repository import GraphRepository
 from knowledge_graph import KnowledgeGraph
-from metrics_service import MetricsService
-from notification_service import NotificationService
-from pattern_engine import PatternEngine
-from presence_service import PresenceService
-from rule_engine import RuleEngine
-from rte import RTE
+from services.metrics_service import MetricsService
+from services.notification_service import NotificationService
+from services.pattern_engine import PatternEngine
+from services.presence_service import PresenceService
+from engines.rule_engine import RuleEngine
+from engines.rte import RTE
 from schemas import NormalizedEvent
 from schemas.actions import Action, Notification
 from schemas.enums import ActionType, ImpactLevel, RouteDecision

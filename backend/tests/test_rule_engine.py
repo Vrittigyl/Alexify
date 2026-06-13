@@ -14,7 +14,7 @@ from schemas.enums import (
     ImpactLevel, NotificationChannel, RuleType,
 )
 from schemas.rules import RuleAction, RuleCondition, RuleTrigger
-from rule_engine import RuleEvaluationEngine, ConflictResolver, RuleEngine, RuleRegistry
+from engines.rule_engine import RuleEvaluationEngine, ConflictResolver, RuleEngine, RuleRegistry
 
 HH_ID = "hh_xk92p_sharma"
 
@@ -527,7 +527,7 @@ def test_engine_run_returns_action_for_water_motor_tank_full():
     This test catches the class-variable idempotency bug at the engine level.
     Previously: 11/11 unit tests passed but this exact scenario returned 0 actions.
     """
-    from rule_engine import RuleEngine
+    from engines.rule_engine import RuleEngine
 
     engine = RuleEngine()
     engine._registry.load("hh_xk92p_sharma")
