@@ -44,26 +44,40 @@ class NotificationService:
         """
         Send a notification to target members.
         Returns True if dispatched, False if rate-limited.
+        Uses distributed Redis Sliding Window if available, falls back to memory.
         """
         now = time.monotonic()
         cutoff = now - self._window_secs
 
+        from db.redis_client import redis_client
+
         for member_id in notification.target_member_ids:
-            # Evict old timestamps
-            self._rate_tracker[member_id] = [
-                t for t in self._rate_tracker[member_id] if t > cutoff
-            ]
-            if len(self._rate_tracker[member_id]) >= self._max_per_window:
-                logger.warning(
-                    f"NotificationService: rate-limited member={member_id} "
-                    f"({len(self._rate_tracker[member_id])}/{self._max_per_window})"
-                )
+            redis_key = f"saathi:v1:rate:notify:{member_id}"
+            redis_allowed = await redis_client.check_rate_limit(
+                redis_key, self._max_per_window, self._window_secs
+            )
+
+            if redis_allowed is False:
+                logger.warning(f"NotificationService: rate-limited member={member_id} (Redis)")
                 notification.rate_limited = True
                 return False
+            elif redis_allowed is None:
+                # Fallback to local memory
+                self._rate_tracker[member_id] = [
+                    t for t in self._rate_tracker[member_id] if t > cutoff
+                ]
+                if len(self._rate_tracker[member_id]) >= self._max_per_window:
+                    logger.warning(
+                        f"NotificationService: rate-limited member={member_id} "
+                        f"({len(self._rate_tracker[member_id])}/{self._max_per_window}) (Fallback)"
+                    )
+                    notification.rate_limited = True
+                    return False
+                self._rate_tracker[member_id].append(now)
 
-        # All members pass rate check
-        for member_id in notification.target_member_ids:
-            self._rate_tracker[member_id].append(now)
+        # Note: If Redis is ON, `check_rate_limit` already added the timestamp atomically!
+        # We don't need to append to `self._rate_tracker` on success if Redis is active,
+        # but the fallback block above handles local tracking when Redis is OFF.
 
         # Simulate dispatch
         formatted = self._format_message(notification)

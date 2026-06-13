@@ -118,7 +118,7 @@ class ContextEngine:
             table = get_table("household_graph")
             from boto3.dynamodb.conditions import Key, Attr
             resp = table.query(
-                KeyConditionExpression=Key("household_id").eq(household_id),
+                KeyConditionExpression=Key("PK").eq(f"HOUSEHOLD#{household_id}") & Key("SK").begins_with("NODE#"),
                 FilterExpression=Attr("node_type").eq("device"),
             )
             states = {}
@@ -143,7 +143,7 @@ class ContextEngine:
             table = get_table("household_graph")
             from boto3.dynamodb.conditions import Key, Attr
             resp = table.query(
-                KeyConditionExpression=Key("household_id").eq(household_id),
+                KeyConditionExpression=Key("PK").eq(f"HOUSEHOLD#{household_id}") & Key("SK").begins_with("NODE#"),
                 FilterExpression=Attr("node_type").eq("life_event"),
             )
             return [

@@ -47,10 +47,16 @@ class DeviceCommandBus:
         command = action.command or "unknown"
 
         # Step 1: Idempotency check
-        idem_key = f"{device_id}:{command}"
-        last = self._idem_cache.get(idem_key, 0)
-        if (time.monotonic() - last) < _IDEM_WINDOW_SECS:
-            logger.info(f"CommandBus: duplicate suppressed {idem_key}")
+        idem_key_local = f"{device_id}:{command}"
+        idem_key_redis = f"saathi:v1:idem:cmd:{device_id}:{command}"
+        
+        # Try Redis first
+        from db.redis_client import redis_client
+        lock_acquired = await redis_client.acquire_idempotency_lock(idem_key_redis, _IDEM_WINDOW_SECS)
+        
+        if lock_acquired is False:
+            # Redis denied the lock -> duplicate command
+            logger.info(f"CommandBus: duplicate suppressed by Redis {idem_key_redis}")
             return CommandResult(
                 action_id=action.action_id,
                 device_id=device_id,
@@ -58,8 +64,24 @@ class DeviceCommandBus:
                 success=False,
                 error="Idempotency suppressed — same command dispatched within 60s",
                 latency_ms=(time.monotonic() - start) * 1000,
-                idempotency_key=idem_key,
+                idempotency_key=idem_key_redis,
             )
+        elif lock_acquired is None:
+            # Redis failed -> fallback to local memory check
+            last = self._idem_cache.get(idem_key_local, 0)
+            if (time.monotonic() - last) < _IDEM_WINDOW_SECS:
+                logger.info(f"CommandBus: duplicate suppressed by local fallback {idem_key_local}")
+                return CommandResult(
+                    action_id=action.action_id,
+                    device_id=device_id,
+                    command=command,
+                    success=False,
+                    error="Idempotency suppressed — same command dispatched within 60s",
+                    latency_ms=(time.monotonic() - start) * 1000,
+                    idempotency_key=idem_key_local,
+                )
+            # Local lock acquired
+            self._idem_cache[idem_key_local] = time.monotonic()
 
         # Step 2: Capture pre-state (mock)
         pre_state = await self._get_device_state(device_id)
@@ -79,8 +101,8 @@ class DeviceCommandBus:
                 latency_ms=(time.monotonic() - start) * 1000,
             )
 
-        # Step 4: Mark idempotency
-        self._idem_cache[idem_key] = time.monotonic()
+        # Step 4: Mark idempotency (update local fallback cache unconditionally)
+        self._idem_cache[idem_key_local] = time.monotonic()
 
         latency_ms = (time.monotonic() - start) * 1000
 
@@ -93,7 +115,7 @@ class DeviceCommandBus:
             post_state=post_state,
             error=error,
             latency_ms=latency_ms,
-            idempotency_key=idem_key,
+            idempotency_key=idem_key_redis,
         )
 
         # Step 5: Write to ActionLog (non-blocking)

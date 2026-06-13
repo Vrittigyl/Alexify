@@ -142,7 +142,7 @@ class RuleEvaluationEngine:
         # RuleEngine.run() call to see the key from the first and suppress.
         self._idempotency_cache: dict[str, float] = {}
 
-    def evaluate(
+    async def evaluate(
         self,
         event: NormalizedEvent,
         context: dict[str, Any],
@@ -170,13 +170,27 @@ class RuleEvaluationEngine:
 
         # Step 3: Idempotency window check
         if rule.idempotency_window_secs:
-            idem_key = self._idempotency_key(event.household_id, rule.rule_id)
-            if self._is_idempotent(idem_key, rule.idempotency_window_secs):
+            idem_key_local = self._idempotency_key(event.household_id, rule.rule_id)
+            idem_key_redis = f"saathi:v1:idem:rule:{event.household_id}:{rule.rule_id}"
+            
+            # Try Redis first
+            from db.redis_client import redis_client
+            lock_acquired = await redis_client.acquire_idempotency_lock(idem_key_redis, rule.idempotency_window_secs)
+            
+            if lock_acquired is False:
+                # Redis denied the lock
                 return EvaluationResult(
                     match=False,
-                    reason=f"Idempotency window active for rule {rule.rule_id}",
+                    reason=f"Idempotency window active for rule {rule.rule_id} (Redis)",
                 )
-            self._mark_idempotent(idem_key)
+            elif lock_acquired is None:
+                # Fallback to local memory
+                if self._is_idempotent(idem_key_local, rule.idempotency_window_secs):
+                    return EvaluationResult(
+                        match=False,
+                        reason=f"Idempotency window active for rule {rule.rule_id} (Fallback)",
+                    )
+                self._mark_idempotent(idem_key_local, rule.idempotency_window_secs)
 
         # Step 4: Build action from rule
         return EvaluationResult(
@@ -293,8 +307,8 @@ class RuleEvaluationEngine:
         expiry = self._idempotency_cache.get(key)
         return expiry is not None and expiry > time.time()
 
-    def _mark_idempotent(self, key: str) -> None:
-        self._idempotency_cache[key] = time.time() + settings.IDEMPOTENCY_WINDOW_SECS
+    def _mark_idempotent(self, key: str, window_secs: int) -> None:
+        self._idempotency_cache[key] = time.time() + window_secs
 
 
 # ─────────────────────────────────────────────────────────────
@@ -373,7 +387,7 @@ class RuleEngine:
         self._evaluator = RuleEvaluationEngine()
         self._resolver = ConflictResolver()
 
-    def run(
+    async def run(
         self,
         event: NormalizedEvent,
         context: dict[str, Any] | None = None,
@@ -395,7 +409,7 @@ class RuleEngine:
         escalate = False
 
         for rule in candidates:
-            result = self._evaluator.evaluate(event, context, rule)
+            result = await self._evaluator.evaluate(event, context, rule)
             if result.escalate_to_bedrock:
                 escalate = True
             if result.match:
@@ -414,14 +428,16 @@ class RuleEngine:
         # Log conflicts if any were suppressed
         if len(matched) > len(winners):
             suppressed = [r.rule_id for r, _ in matched if (r, _) not in winners]
-            asyncio.create_task(
-                _log_conflict({
+            from services.task_tracker import task_tracker
+            task_tracker.spawn(
+                _log_conflict,
+                {
                     "event_id": event.event_id,
                     "household_id": event.household_id,
                     "winning_rules": [r.rule_id for r, _ in winners],
                     "suppressed_rules": suppressed,
-                })
-            ) if asyncio.get_event_loop().is_running() else None
+                }
+            )
 
         # Build Action objects
         actions: list[Action] = []

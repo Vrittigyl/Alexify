@@ -82,7 +82,8 @@ def make_rule(
 # Scenario 1: tank 96% → motor OFF (safety rule)
 # ─────────────────────────────────────────────────────────────
 
-def test_scenario_1_tank_full_motor_off():
+@pytest.mark.asyncio
+async def test_scenario_1_tank_full_motor_off():
     evaluator = RuleEvaluationEngine()
     rule = make_rule(
         rule_id="rl_water_motor_tank_full",
@@ -95,7 +96,7 @@ def test_scenario_1_tank_full_motor_off():
     )
     event = make_event(payload={"tank_level_percent": 96, "state": "on"})
 
-    result = evaluator.evaluate(event, {}, rule)
+    result = await evaluator.evaluate(event, {}, rule)
 
     assert result.match is True
     assert result.escalate_to_bedrock is False
@@ -107,7 +108,8 @@ def test_scenario_1_tank_full_motor_off():
 # Scenario 2: geyser 21min → reminder (safety timeout)
 # ─────────────────────────────────────────────────────────────
 
-def test_scenario_2_geyser_timeout_reminder():
+@pytest.mark.asyncio
+async def test_scenario_2_geyser_timeout_reminder():
     evaluator = RuleEvaluationEngine()
     rule = make_rule(
         rule_id="rl_geyser_timeout",
@@ -127,7 +129,7 @@ def test_scenario_2_geyser_timeout_reminder():
         payload={"running_minutes": 21, "state": "on"},
     )
 
-    result = evaluator.evaluate(event, {}, rule)
+    result = await evaluator.evaluate(event, {}, rule)
 
     assert result.match is True
     assert result.actions[0].type == ActionType.NOTIFICATION
@@ -137,7 +139,8 @@ def test_scenario_2_geyser_timeout_reminder():
 # Scenario 3: 3 whistles → timer start (fleet rule)
 # ─────────────────────────────────────────────────────────────
 
-def test_scenario_3_pressure_cooker_3_whistles():
+@pytest.mark.asyncio
+async def test_scenario_3_pressure_cooker_3_whistles():
     evaluator = RuleEvaluationEngine()
     rule = make_rule(
         rule_id="rl_pressure_cooker_3_whistles",
@@ -157,7 +160,7 @@ def test_scenario_3_pressure_cooker_3_whistles():
         payload={"whistle_count": 3, "state": "on"},
     )
 
-    result = evaluator.evaluate(event, {}, rule)
+    result = await evaluator.evaluate(event, {}, rule)
 
     assert result.match is True
     assert result.actions[0].type == ActionType.TIMER_START
@@ -167,7 +170,8 @@ def test_scenario_3_pressure_cooker_3_whistles():
 # Scenario 4: Dadaji medicine at 20:45 → reminder (promoted pattern)
 # ─────────────────────────────────────────────────────────────
 
-def test_scenario_4_dadaji_medicine_reminder():
+@pytest.mark.asyncio
+async def test_scenario_4_dadaji_medicine_reminder():
     evaluator = RuleEvaluationEngine()
     rule = make_rule(
         rule_id="rl_dadaji_medicine_evening",
@@ -187,7 +191,7 @@ def test_scenario_4_dadaji_medicine_reminder():
         payload={"schedule_id": "rtn_dadaji_evening_meds", "time": "20:45"},
     )
 
-    result = evaluator.evaluate(event, {}, rule)
+    result = await evaluator.evaluate(event, {}, rule)
 
     assert result.match is True
     assert result.actions[0].type == ActionType.REMINDER
@@ -197,7 +201,8 @@ def test_scenario_4_dadaji_medicine_reminder():
 # Scenario 5: fridge door 6min → reminder (fleet default)
 # ─────────────────────────────────────────────────────────────
 
-def test_scenario_5_fridge_door_open_reminder():
+@pytest.mark.asyncio
+async def test_scenario_5_fridge_door_open_reminder():
     evaluator = RuleEvaluationEngine()
     rule = make_rule(
         rule_id="rl_fridge_door_open",
@@ -217,7 +222,7 @@ def test_scenario_5_fridge_door_open_reminder():
         payload={"door_open_seconds": 360, "state": "door_open"},
     )
 
-    result = evaluator.evaluate(event, {}, rule)
+    result = await evaluator.evaluate(event, {}, rule)
 
     assert result.match is True
     assert result.actions[0].type == ActionType.NOTIFICATION
@@ -227,7 +232,8 @@ def test_scenario_5_fridge_door_open_reminder():
 # Scenario 6: quiet hours + loud TV → volume reduce (custom rule)
 # ─────────────────────────────────────────────────────────────
 
-def test_scenario_6_quiet_hours_loud_tv():
+@pytest.mark.asyncio
+async def test_scenario_6_quiet_hours_loud_tv():
     evaluator = RuleEvaluationEngine()
     rule = make_rule(
         rule_id="rl_quiet_hours_tv",
@@ -255,7 +261,7 @@ def test_scenario_6_quiet_hours_loud_tv():
     )
     context = {"quiet_hours_active": True}
 
-    result = evaluator.evaluate(event, context, rule)
+    result = await evaluator.evaluate(event, context, rule)
 
     assert result.match is True
     assert result.actions[0].command == "reduce_volume"
@@ -265,7 +271,8 @@ def test_scenario_6_quiet_hours_loud_tv():
 # Scenario 7: health vs fleet conflict → health wins
 # ─────────────────────────────────────────────────────────────
 
-def test_scenario_7_health_beats_fleet():
+@pytest.mark.asyncio
+async def test_scenario_7_health_beats_fleet():
     resolver = ConflictResolver()
     evaluator = RuleEvaluationEngine()
 
@@ -298,8 +305,8 @@ def test_scenario_7_health_beats_fleet():
         payload={"running_minutes": 25},
     )
 
-    fleet_result = evaluator.evaluate(event, {}, fleet_rule)
-    health_result = evaluator.evaluate(event, {}, health_rule)
+    fleet_result = await evaluator.evaluate(event, {}, fleet_rule)
+    health_result = await evaluator.evaluate(event, {}, health_rule)
 
     assert fleet_result.match is True
     assert health_result.match is True
@@ -315,7 +322,8 @@ def test_scenario_7_health_beats_fleet():
 # Scenario 8: fleet vs custom geyser → custom wins (temp < 15°C)
 # ─────────────────────────────────────────────────────────────
 
-def test_scenario_8_custom_beats_fleet():
+@pytest.mark.asyncio
+async def test_scenario_8_custom_beats_fleet():
     resolver = ConflictResolver()
     evaluator = RuleEvaluationEngine()
 
@@ -356,8 +364,8 @@ def test_scenario_8_custom_beats_fleet():
         payload={"running_minutes": 35, "temperature_c": 10},
     )
 
-    fleet_result = evaluator.evaluate(event, {}, fleet_rule)
-    custom_result = evaluator.evaluate(event, {}, custom_rule)
+    fleet_result = await evaluator.evaluate(event, {}, fleet_rule)
+    custom_result = await evaluator.evaluate(event, {}, custom_rule)
 
     assert fleet_result.match is True
     assert custom_result.match is True
@@ -373,7 +381,8 @@ def test_scenario_8_custom_beats_fleet():
 # Scenario 9: on_fail escalate_to_bedrock → escalate flag set
 # ─────────────────────────────────────────────────────────────
 
-def test_scenario_9_on_fail_escalate_to_bedrock():
+@pytest.mark.asyncio
+async def test_scenario_9_on_fail_escalate_to_bedrock():
     evaluator = RuleEvaluationEngine()
     rule = make_rule(
         rule_id="rl_health_complex",
@@ -403,7 +412,7 @@ def test_scenario_9_on_fail_escalate_to_bedrock():
     # context.health_condition_active is missing → on_fail kicks in
     context = {}
 
-    result = evaluator.evaluate(event, context, rule)
+    result = await evaluator.evaluate(event, context, rule)
 
     assert result.match is False
     assert result.escalate_to_bedrock is True
@@ -413,7 +422,8 @@ def test_scenario_9_on_fail_escalate_to_bedrock():
 # Scenario 10: idempotency window active → action suppressed
 # ─────────────────────────────────────────────────────────────
 
-def test_scenario_10_idempotency_suppresses_duplicate():
+@pytest.mark.asyncio
+async def test_scenario_10_idempotency_suppresses_duplicate():
     evaluator = RuleEvaluationEngine()
     rule = make_rule(
         rule_id="rl_idem_test",
@@ -429,7 +439,7 @@ def test_scenario_10_idempotency_suppresses_duplicate():
 
     # First call — should fire
     evaluator._idempotency_cache.clear()
-    first = evaluator.evaluate(event, {}, rule)
+    first = await evaluator.evaluate(event, {}, rule)
     assert first.match is True
 
     # Manually inject expiry in the future to simulate active window
@@ -437,7 +447,7 @@ def test_scenario_10_idempotency_suppresses_duplicate():
     evaluator._idempotency_cache[idem_key] = time.time() + 3600
 
     # Second call — should be suppressed
-    second = evaluator.evaluate(event, {}, rule)
+    second = await evaluator.evaluate(event, {}, rule)
     assert second.match is False
     assert "Idempotency" in (second.reason or "")
 
@@ -446,7 +456,8 @@ def test_scenario_10_idempotency_suppresses_duplicate():
 # Bonus: safety rules survive conflict resolution (never suppressed)
 # ─────────────────────────────────────────────────────────────
 
-def test_safety_rules_never_suppressed():
+@pytest.mark.asyncio
+async def test_safety_rules_never_suppressed():
     resolver = ConflictResolver()
     evaluator = RuleEvaluationEngine()
 
@@ -470,8 +481,8 @@ def test_safety_rules_never_suppressed():
     )
     event = make_event(payload={"tank_level_percent": 98})
 
-    safety_result = evaluator.evaluate(event, {}, safety_rule)
-    custom_result = evaluator.evaluate(event, {}, custom_rule)
+    safety_result = await evaluator.evaluate(event, {}, safety_rule)
+    custom_result = await evaluator.evaluate(event, {}, custom_rule)
 
     winners = resolver.resolve([(safety_rule, safety_result), (custom_rule, custom_result)])
     winner_ids = {r.rule_id for r, _ in winners}
@@ -485,7 +496,8 @@ def test_safety_rules_never_suppressed():
 # Defensive tests — catching the class-variable idempotency bug
 # ─────────────────────────────────────────────────────────────
 
-def test_two_evaluator_instances_do_not_share_idempotency_cache():
+@pytest.mark.asyncio
+async def test_two_evaluator_instances_do_not_share_idempotency_cache():
     """
     RuleEvaluationEngine._idempotency_cache must be instance-level, not class-level.
     If it were class-level, evaluator_a firing a rule would suppress evaluator_b
@@ -509,18 +521,19 @@ def test_two_evaluator_instances_do_not_share_idempotency_cache():
     evaluator_b = RuleEvaluationEngine()
 
     # evaluator_a fires first — marks the key
-    result_a = evaluator_a.evaluate(event, {}, rule)
+    result_a = await evaluator_a.evaluate(event, {}, rule)
     assert result_a.match is True, "First evaluator should fire"
 
     # evaluator_b is a different instance — must NOT see evaluator_a's cache
-    result_b = evaluator_b.evaluate(event, {}, rule)
+    result_b = await evaluator_b.evaluate(event, {}, rule)
     assert result_b.match is True, (
         "Second evaluator instance must fire independently. "
         "If this fails, _idempotency_cache is a class variable (shared state bug)."
     )
 
 
-def test_engine_run_returns_action_for_water_motor_tank_full():
+@pytest.mark.asyncio
+async def test_engine_run_returns_action_for_water_motor_tank_full():
     """
     Integration test: engine.run() must produce at least 1 action for the
     rl_water_motor_tank_full rule when tank_level_percent=96.
@@ -534,7 +547,7 @@ def test_engine_run_returns_action_for_water_motor_tank_full():
 
     event = make_event(payload={"tank_level_percent": 96, "state": "on"})
 
-    actions = engine.run(event)
+    actions = await engine.run(event)
 
     assert len(actions) >= 1, f"Expected at least 1 action, got {len(actions)}"
     action_types = {a.action_type for a in actions}

@@ -45,7 +45,9 @@ class Settings(BaseSettings):
     # redis_enabled=True  → distributed state via ElastiCache / local Redis
     redis_enabled: bool = Field(default=False, alias="REDIS_ENABLED")
     redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
-    redis_socket_timeout: float = Field(default=2.0, alias="REDIS_SOCKET_TIMEOUT")
+    redis_socket_timeout: float = Field(default=1.0, alias="REDIS_SOCKET_TIMEOUT")
+    redis_connect_timeout: float = Field(default=1.0, alias="REDIS_CONNECT_TIMEOUT")
+    redis_health_check_interval: int = Field(default=30, alias="REDIS_HEALTH_CHECK_INTERVAL")
 
     # ── SQS ───────────────────────────────────────────────
     # sqs_enabled=False → events processed synchronously in-process (default)

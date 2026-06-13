@@ -50,7 +50,7 @@ class ActionPlanner:
         # Must survive across requests — hence singleton usage in main.py.
         self._rate_tracker: dict[str, list[float]] = defaultdict(list)
 
-    def plan(
+    async def plan(
         self,
         proposed: list[Action],
         context: HouseholdContext | None = None,
@@ -75,7 +75,7 @@ class ActionPlanner:
         self._emit_step("conflict_resolve", len(approved), resolved, _bcast)
 
         # Step 3: Rate limit
-        approved, rate_limited = self._rate_limit(approved)
+        approved, rate_limited = await self._rate_limit(approved)
         self._emit_step("rate_limit", len(approved), rate_limited, _bcast)
 
         # Step 4: Schedule (pass-through — schedule field is advisory)
@@ -156,32 +156,51 @@ class ActionPlanner:
 
     # ── Step 3: Rate limit ────────────────────────────────────
 
-    def _rate_limit(
+    async def _rate_limit(
         self, actions: list[Action]
     ) -> tuple[list[Action], list[Action]]:
         """
         Block device commands if the same device has had >= 5 commands in the last hour.
+        Uses distributed Redis Sliding Window if available, falls back to memory.
         """
         approved, limited = [], []
+        
+        # We still need local monotonic time for memory fallback
         now = time.monotonic()
         cutoff = now - _RATE_LIMIT_WINDOW_SECS
+        
+        from db.redis_client import redis_client
 
         for a in actions:
             if a.action_type != ActionType.DEVICE_COMMAND or not a.device_id:
                 approved.append(a)
                 continue
 
-            # Evict old timestamps
-            self._rate_tracker[a.device_id] = [
-                t for t in self._rate_tracker[a.device_id] if t > cutoff
-            ]
-
-            if len(self._rate_tracker[a.device_id]) >= _RATE_LIMIT_DEVICE_COMMANDS_PER_HOUR:
-                logger.warning(f"ActionPlanner: rate-limited action for device {a.device_id}")
+            # Check Redis first
+            redis_key = f"saathi:v1:rate:device:{a.device_id}"
+            redis_allowed = await redis_client.check_rate_limit(
+                redis_key, _RATE_LIMIT_DEVICE_COMMANDS_PER_HOUR, _RATE_LIMIT_WINDOW_SECS
+            )
+            
+            if redis_allowed is False:
+                # Blocked by Redis
+                logger.warning(f"ActionPlanner: rate-limited action for device {a.device_id} (Redis)")
                 limited.append(a)
-            else:
-                self._rate_tracker[a.device_id].append(now)
-                approved.append(a)
+                continue
+            elif redis_allowed is None:
+                # Redis unavailable, fallback to local memory check
+                self._rate_tracker[a.device_id] = [
+                    t for t in self._rate_tracker[a.device_id] if t > cutoff
+                ]
+                
+                if len(self._rate_tracker[a.device_id]) >= _RATE_LIMIT_DEVICE_COMMANDS_PER_HOUR:
+                    logger.warning(f"ActionPlanner: rate-limited action for device {a.device_id} (Fallback)")
+                    limited.append(a)
+                    continue
+                else:
+                    self._rate_tracker[a.device_id].append(now)
+            
+            approved.append(a)
 
         return approved, limited
 
@@ -197,15 +216,11 @@ class ActionPlanner:
         fn = broadcast_fn or self._broadcast
         if not fn:
             return
-        import asyncio
         data = {
             "step": step,
             "approved_count": approved_count,
             "rejected_count": len(rejected),
             "rejected_ids": [a.action_id for a in rejected],
         }
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(fn("action_planner_step", data))
-        except RuntimeError:
-            pass
+        from services.task_tracker import task_tracker
+        task_tracker.spawn(fn, "action_planner_step", data, fallback="drop")

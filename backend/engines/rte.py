@@ -363,16 +363,7 @@ class RTE:
         )
 
         # Fire-and-forget audit log
-        loop = None
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            pass
-
-        if loop and loop.is_running():
-            loop.create_task(_audit_log(decision))
-        else:
-            # Sync fallback for non-async contexts (scripts, tests)
-            asyncio.run(_audit_log(decision))
+        from services.task_tracker import task_tracker
+        task_tracker.spawn(_audit_log, decision, fallback="sync")
 
         return decision

@@ -156,8 +156,8 @@ class MetricsService:
     def _async_persist(self) -> None:
         """Fire-and-forget DynamoDB write. Never blocks the hot path."""
         try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(self._write_to_dynamo())
+            from services.task_tracker import task_tracker
+            task_tracker.spawn(self._write_to_dynamo, fallback="drop")
         except RuntimeError:
             # Not in async context (e.g., scripts/tests) — skip persist
             pass

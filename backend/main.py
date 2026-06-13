@@ -109,6 +109,7 @@ class ConnectionManager:
 
     def __init__(self):
         self._connections: dict[str, list[WebSocket]] = {}
+        self.pod_id = uuid.uuid4().hex
 
     async def connect(self, household_id: str, ws: WebSocket) -> None:
         await ws.accept()
@@ -121,6 +122,16 @@ class ConnectionManager:
             conns.remove(ws)
 
     async def broadcast(self, household_id: str, event_type: str, data: dict) -> None:
+        """Primary API. Performs local broadcast, then attempts to publish to Redis."""
+        await self._local_broadcast(household_id, event_type, data)
+
+        try:
+            await self._publish_to_redis(household_id, event_type, data)
+        except Exception as e:
+            logger.warning(f"WS: Redis publish failed, falling back to local only: {e}")
+
+    async def _local_broadcast(self, household_id: str, event_type: str, data: dict) -> None:
+        """Sends the message to all connected WebSockets on THIS specific pod."""
         msg = WSMessage(
             type=WSEventType(event_type),
             household_id=household_id,
@@ -135,6 +146,74 @@ class ConnectionManager:
                 stale.append(ws)
         for ws in stale:
             self.disconnect(household_id, ws)
+
+    async def _publish_to_redis(self, household_id: str, event_type: str, data: dict) -> None:
+        """Publishes the message to the global Redis channel for fanout."""
+        import json
+        import time
+        from db.redis_client import redis_client
+        if not redis_client.enabled or not redis_client._redis:
+            return
+
+        payload = json.dumps({
+            "household_id": household_id,
+            "event_type": event_type,
+            "data": data,
+            "request_id": request_id_var.get(""),
+            "timestamp": time.time(),
+            "origin_pod_id": self.pod_id
+        })
+        await redis_client._redis.publish("saathi:v1:ws:broadcast", payload)
+
+    async def start_subscriber(self) -> None:
+        """Background loop listening for distributed WS broadcasts."""
+        import json
+        import asyncio
+        from db.redis_client import redis_pubsub_client
+
+        backoff = 1
+        max_backoff = 30
+
+        while True:
+            try:
+                if not redis_pubsub_client.enabled:
+                    await asyncio.sleep(5)
+                    continue
+
+                if not redis_pubsub_client.connected:
+                    await redis_pubsub_client.connect()
+
+                if not redis_pubsub_client._redis:
+                    await asyncio.sleep(5)
+                    continue
+
+                pubsub = redis_pubsub_client._redis.pubsub()
+                await pubsub.subscribe("saathi:v1:ws:broadcast")
+                logger.info("WS Subscriber: Connected and listening to saathi:v1:ws:broadcast")
+                
+                # Reset backoff on successful connection
+                backoff = 1
+
+                async for message in pubsub.listen():
+                    if message["type"] == "message":
+                        try:
+                            msg = json.loads(message["data"])
+                            # Self-echo prevention
+                            if msg.get("origin_pod_id") == self.pod_id:
+                                continue
+                            
+                            # Deliver locally. Subscriber MUST NEVER call public `broadcast()`
+                            await self._local_broadcast(
+                                msg["household_id"],
+                                msg["event_type"],
+                                msg["data"]
+                            )
+                        except Exception as e:
+                            logger.error(f"WS Subscriber parse error: {e}")
+            except Exception as e:
+                logger.warning(f"WS Subscriber connection lost: {e}. Retrying in {backoff}s...")
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, max_backoff)
 
     def connection_count(self, household_id: str) -> int:
         return len(self._connections.get(household_id, []))
@@ -202,12 +281,36 @@ async def lifespan(app: FastAPI):
         learning=len([p for p in all_patterns if p.get("confidence_band") == "LEARNING"]),
         observing=len([p for p in all_patterns if p.get("confidence_band") == "OBSERVING"]),
     )
+    
+    # ── Phase 3.1: Initialize Redis Foundation ─────────────────
+    from db.redis_client import redis_client, redis_pubsub_client
+    await redis_client.connect()
+    # The pubsub client connects automatically in its background loops, but we can explicitly connect here
+    await redis_pubsub_client.connect()
+
+    # ── Phase 3.4: Start Presence Pub/Sub ──────────────────────
+    from services.task_tracker import task_tracker
+
+    logger.info("  Starting Pub/Sub subscribers...")
+    # These run forever until app shuts down
+    task_tracker.spawn(presence.start_subscriber, fallback="drop")
+    task_tracker.spawn(ws_manager.start_subscriber, fallback="drop")
 
     logger.info(f"  Rules loaded : {len(rule_engine._registry._raw_rules)}")
     logger.info(f"  Patterns     : {len(all_patterns)} ({len(promoted)} promoted)")
     logger.info("  SAATHI ready.")
-    yield
-    logger.info("  SAATHI shutting down.")
+
+    try:
+        yield
+    finally:
+        logger.info("  SAATHI — Shutting down")
+        # ── Phase 3.6: Clean task shutdown ─────────────────────────
+        logger.info("  Draining background tasks...")
+        await task_tracker.shutdown(timeout=5.0)
+        
+        await redis_client.close()
+        await redis_pubsub_client.close()
+        logger.info("============================================================")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -315,7 +418,7 @@ async def run_full_pipeline(event: NormalizedEvent) -> dict[str, Any]:
     # 3. Route
     if route == RouteDecision.RULE_ENGINE:
         re_start = time.monotonic()
-        proposed_actions = rule_engine.run(event)
+        proposed_actions = await rule_engine.run(event)
         re_latency = (time.monotonic() - re_start) * 1000
         metrics.record_rule_engine(re_latency)
 
@@ -385,7 +488,7 @@ async def run_full_pipeline(event: NormalizedEvent) -> dict[str, Any]:
         metrics.record_suppressed()
 
     # 4. Action Planner — use module-level singleton; inject per-request broadcast_fn
-    approved = action_planner.plan(
+    approved = await action_planner.plan(
         proposed_actions,
         context,
         broadcast_fn=lambda et, d: ws_manager.broadcast(event.household_id, et, d),
@@ -483,24 +586,32 @@ async def websocket_endpoint(websocket: WebSocket, household_id: str):
 @app.get("/health", tags=["System"])
 async def health():
     """
-    Liveness + readiness probe.
-    Returns HTTP 200 (healthy) or HTTP 503 (degraded).
+    AWS ALB / ECS health check endpoint.
     DynamoDB unavailable → 503 so ALB/ECS stops routing to this pod.
+    Redis unavailable → 200 OK (degraded) because system gracefully falls back.
     """
     dynamo = health_check()
-    is_healthy = dynamo["status"] == "connected"
+    from db.redis_client import redis_client
+    redis_health = redis_client.get_health()
+
+    status = "ok" if redis_health["connected"] or not redis_health["enabled"] else "degraded"
+
     body = {
-        "status": "healthy" if is_healthy else "degraded",
-        "version": "2.1.0",
+        "status": status,
         "household_id": HH_ID,
+        "version": "2.1.0",
         "bedrock_mock_mode": settings.bedrock_mock_mode,
         "dynamo": dynamo["status"],
         "dynamo_region": dynamo.get("region", settings.aws_region),
+        "redis": redis_health,
         "dev_mode": settings.dev_mode,
         "ws_connections": ws_manager.connection_count(HH_ID),
     }
-    if not is_healthy:
+
+    if dynamo["status"] == "unavailable":
+        body["status"] = "unavailable"
         return JSONResponse(status_code=503, content=body)
+
     return body
 
 

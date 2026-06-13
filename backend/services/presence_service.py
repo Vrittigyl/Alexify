@@ -40,6 +40,74 @@ class PresenceService:
         # { "hh_id:member_id": PresenceRecord }
         self._store: dict[str, PresenceRecord] = {}
 
+    # ── Redis Integration ────────────────────────────────────
+
+    def _fire_and_forget(self, coro_factory, *args):
+        from services.task_tracker import task_tracker
+        task_tracker.spawn(coro_factory, *args, fallback="drop")
+
+    async def _push_to_redis(self, household_id: str, member_id: str, room_id: Optional[str], is_home: bool) -> None:
+        """Write presence state to Redis with native TTL and broadcast via Pub/Sub."""
+        try:
+            import json
+            from db.redis_client import redis_client
+            if not redis_client._redis:
+                return
+            
+            key = f"saathi:v1:presence:{household_id}:{member_id}"
+            payload = json.dumps({
+                "household_id": household_id,
+                "member_id": member_id,
+                "room_id": room_id,
+                "is_home": is_home,
+            })
+            # Pipeline for atomicity and efficiency
+            async with redis_client._redis.pipeline() as pipe:
+                pipe.set(key, payload, ex=self._ttl)
+                pipe.publish("saathi:v1:presence_events", payload)
+                await pipe.execute()
+        except Exception as e:
+            logger.warning(f"Failed to push presence to Redis for {member_id}: {e}")
+
+    async def start_subscriber(self) -> None:
+        """Listen for Pub/Sub updates from other pods."""
+        import json
+        from db.redis_client import redis_client
+        
+        while True:
+            try:
+                if not redis_client._redis:
+                    import asyncio
+                    await asyncio.sleep(5)
+                    continue
+
+                pubsub = redis_client._redis.pubsub()
+                await pubsub.subscribe("saathi:v1:presence_events")
+                logger.info("PresenceService: Subscribed to saathi:v1:presence_events")
+
+                async for message in pubsub.listen():
+                    if message["type"] == "message":
+                        try:
+                            data = json.loads(message["data"])
+                            hh_id = data["household_id"]
+                            mem_id = data["member_id"]
+                            key = f"{hh_id}:{mem_id}"
+                            
+                            # Update local memory
+                            self._store[key] = PresenceRecord(
+                                member_id=mem_id,
+                                room_id=data.get("room_id"),
+                                is_home=data.get("is_home", True),
+                            )
+                            # Update timestamp manually just in case so TTL logic works locally too
+                            self._store[key].updated_at = time.monotonic()
+                        except Exception as e:
+                            logger.error(f"PresenceService Pub/Sub parse error: {e}")
+            except Exception as e:
+                logger.warning(f"PresenceService Pub/Sub connection lost: {e}. Retrying in 5s...")
+                import asyncio
+                await asyncio.sleep(5)
+
     # ── Writes ───────────────────────────────────────────────
 
     def update(
@@ -56,6 +124,7 @@ class PresenceService:
             is_home=is_home,
         )
         logger.debug(f"Presence updated: {key} room={room_id} home={is_home}")
+        self._fire_and_forget(self._push_to_redis, household_id, member_id, room_id, is_home)
 
     def mark_left(self, household_id: str, member_id: str) -> None:
         """Explicitly mark a member as having left the household."""
@@ -65,6 +134,7 @@ class PresenceService:
             r.is_home = False
             r.room_id = None
             r.updated_at = time.monotonic()
+            self._fire_and_forget(self._push_to_redis, household_id, member_id, None, False)
 
     # ── Reads ────────────────────────────────────────────────
 
