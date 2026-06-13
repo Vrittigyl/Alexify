@@ -27,3 +27,4 @@ python-dateutil==2.9.0
 
 # ── Infrastructure ────────────────────────────────────────
 redis>=5.0.0
+mangum
