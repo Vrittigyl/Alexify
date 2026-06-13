@@ -1,8 +1,6 @@
 """
 main.py — SAATHI FastAPI Application
-======================================
-Entry point for the SAATHI backend.
-Phase 1: Health endpoint only. Additional endpoints added in Phase 10.
+Entry point for the backend.
 
 Run:
     uvicorn main:app --reload --port 8000
@@ -10,11 +8,12 @@ Run:
 
 import logging
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
 from db.dynamo_client import health_check
+from db.seed_dynamo import run_full_seed
 
 # Logging 
 logging.basicConfig(
@@ -86,6 +85,21 @@ async def health():
     }
 
 
-# Entrypoint 
+@app.post("/admin/seed", tags=["Admin"])
+async def seed_database():
+    """
+    Create all DynamoDB tables and seed with Sharma family data.
+    Safe to call multiple times — existing tables are skipped.
+    Useful for resetting the demo to a known state.
+    """
+    try:
+        result = run_full_seed()
+        return {"status": "ok", "summary": result}
+    except Exception as e:
+        logger.exception("Seeding failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Entrypoint
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
