@@ -18,7 +18,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 
 from config import settings
-from db.dynamo_client import get_table
+from db.dynamo_client import get_table, async_execute
 from graph_repository import GraphRepository
 from services.presence_service import PresenceService
 from schemas.intelligence import HouseholdContext, MemberPresence
@@ -51,7 +51,7 @@ class ContextEngine:
 
     # ── Public API ───────────────────────────────────────────
 
-    def build(self, event, household_id: str) -> HouseholdContext:
+    async def build(self, event, household_id: str) -> HouseholdContext:
         """
         Assembles a full HouseholdContext from all available sources.
         Fast path: each sub-call is cached; typical latency < 5ms.
@@ -60,11 +60,11 @@ class ContextEngine:
 
         ctx = HouseholdContext(
             household_id=household_id,
-            graph_cache_version=self._get_graph_version(household_id),
+            graph_cache_version=await async_execute(self._get_graph_version, household_id),
             members_presence=self._get_members_presence(household_id),
-            device_states=self._get_device_states(household_id),
-            active_life_events=self._get_life_events(household_id),
-            rte_routing_summary=self._get_rte_summary(household_id),
+            device_states=await self._get_device_states(household_id),
+            active_life_events=await async_execute(self._get_life_events, household_id),
+            rte_routing_summary=await async_execute(self._get_rte_summary, household_id),
             time_of_day=self._time_of_day(now_ist),
             ist_time=now_ist.strftime("%H:%M"),
             day_of_week=_DAY_NAMES[now_ist.weekday()],
@@ -101,14 +101,14 @@ class ContextEngine:
 
     # ── Device states ────────────────────────────────────────
 
-    def _get_device_states(self, household_id: str) -> dict[str, dict]:
+    async def _get_device_states(self, household_id: str) -> dict[str, dict]:
         cached = self._device_cache.get(household_id)
         if cached:
             ts, states = cached
             if (time.monotonic() - ts) < self._stale_secs:
                 return states
 
-        states = self._fetch_device_states_from_dynamo(household_id)
+        states = await async_execute(self._fetch_device_states_from_dynamo, household_id)
         self._device_cache[household_id] = (time.monotonic(), states)
         return states
 

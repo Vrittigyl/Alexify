@@ -194,8 +194,10 @@ class BedrockCircuitBreaker:
             return
         try:
             from services.notification_service import NotificationService  # type: ignore
+            import asyncio
             ns = NotificationService()
-            ns.notify_bedrock_degradation(household_id)
+            loop = asyncio.get_running_loop()
+            loop.create_task(ns.notify_bedrock_degradation(household_id))
         except ImportError:
             logger.warning(
                 f"Bedrock circuit opened for {household_id} — "

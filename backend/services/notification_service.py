@@ -40,7 +40,7 @@ class NotificationService:
 
     # ── 10.3 Main notify ─────────────────────────────────────
 
-    def notify(self, notification: Notification) -> bool:
+    async def notify(self, notification: Notification) -> bool:
         """
         Send a notification to target members.
         Returns True if dispatched, False if rate-limited.
@@ -68,7 +68,7 @@ class NotificationService:
         # Simulate dispatch
         formatted = self._format_message(notification)
         self._simulate_dispatch(notification, formatted)
-        self._write_notification_log(notification, formatted)
+        await self._write_notification_log(notification, formatted)
 
         notification.sent = True
         notification.sent_at = datetime.now(tz=timezone.utc)
@@ -81,7 +81,7 @@ class NotificationService:
 
     # ── 10.4 Bedrock degradation ──────────────────────────────
 
-    def notify_bedrock_degradation(self, household_id: str) -> None:
+    async def notify_bedrock_degradation(self, household_id: str) -> None:
         """
         Fires when Bedrock circuit breaker opens.
         Targets primary coordinator (mbr_papa_003 by convention for Sharma family).
@@ -100,7 +100,7 @@ class NotificationService:
             title="SAATHI — AI Temporarily Unavailable",
             source=ActionSource.RULE_ENGINE,
         )
-        self.notify(notif)
+        await self.notify(notif)
         logger.warning(
             f"NotificationService: Bedrock degradation alert sent for {household_id}"
         )
@@ -127,7 +127,7 @@ class NotificationService:
                 f"  [SIM] {channel.upper()} -> {member_id}: {formatted[:80]}..."
             )
 
-    def _write_notification_log(self, notification: Notification, formatted: str) -> None:
+    async def _write_notification_log(self, notification: Notification, formatted: str) -> None:
         """Write notification record to ActionLog."""
         try:
             import time as _t
@@ -147,7 +147,8 @@ class NotificationService:
                 "rate_limited":  notification.rate_limited,
                 "audit_expiry":  ttl,
             }
-            table.put_item(Item=item)
+            from db.dynamo_client import async_execute
+            await async_execute(table.put_item, Item=item)
         except Exception as e:
             logger.debug(f"Notification log write failed (non-critical): {e}")
 

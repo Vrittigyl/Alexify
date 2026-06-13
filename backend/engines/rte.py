@@ -272,7 +272,8 @@ async def _audit_log(decision: RTEDecision) -> None:
         if decision.latency_ms:
             item["latency_ms"] = Decimal(str(decision.latency_ms))
 
-        table.put_item(Item=item)
+        from db.dynamo_client import async_execute
+        await async_execute(table.put_item, Item=item)
         logger.debug(f"RTEAuditLog written: event={decision.event_id}, route={decision.route.value}")
     except Exception as e:
         logger.warning(f"RTEAuditLog write failed (non-critical): {e}")

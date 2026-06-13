@@ -93,8 +93,7 @@ class PatternEngine:
         Demote a PROMOTED pattern back to LEARNING.
         Returns True if demotion happened.
         """
-        patterns = self.load(household_id)
-        target = next((p for p in patterns if p.pattern_id == pattern_id), None)
+        target = self._get_pattern(household_id, pattern_id)
         if not target or target.confidence_band != ConfidenceBand.PROMOTED:
             return False
 
@@ -112,8 +111,7 @@ class PatternEngine:
         Increment consecutive_misses. If threshold exceeded and pattern is PROMOTED,
         auto-demote.
         """
-        patterns = self.load(household_id)
-        target = next((p for p in patterns if p.pattern_id == pattern_id), None)
+        target = self._get_pattern(household_id, pattern_id)
         if not target:
             return None
 
@@ -139,8 +137,7 @@ class PatternEngine:
         """
         Increment consecutive_overrides. Flag for human review if threshold hit.
         """
-        patterns = self.load(household_id)
-        target = next((p for p in patterns if p.pattern_id == pattern_id), None)
+        target = self._get_pattern(household_id, pattern_id)
         if not target:
             return None
 
@@ -191,7 +188,19 @@ class PatternEngine:
 
         return upserted
 
-    # ── Persist ──────────────────────────────────────────────
+    # ── Persist / Read Single ───────────────────────────────
+
+    def _get_pattern(self, household_id: str, pattern_id: str) -> PatternRecord | None:
+        """Fetch a single pattern using DynamoDB GetItem (O(1))."""
+        try:
+            table = get_table("household_patterns")
+            resp = table.get_item(Key={"household_id": household_id, "pattern_id": pattern_id})
+            item = resp.get("Item")
+            if item:
+                return PatternRecord(**item)
+        except Exception as e:
+            logger.warning(f"Failed to fetch pattern {pattern_id}: {e}")
+        return None
 
     def _persist(self, household_id: str, pattern: PatternRecord) -> None:
         """Write PatternRecord back to HouseholdPatterns DynamoDB table."""

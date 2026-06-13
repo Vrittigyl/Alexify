@@ -1,7 +1,14 @@
 """
-main.py — SAATHI FastAPI Application v2.0
+main.py — SAATHI FastAPI Application v2.1
 ==========================================
 Phase 10: Full pipeline wired. WebSocket hub. 13 REST endpoints.
+Phase 11 (Production Readiness):
+  - Structured JSON logging via services/logging_config.py
+  - Request correlation ID middleware (X-Request-ID)
+  - API key authentication middleware (X-API-Key, bypassed in dev_mode)
+  - CORS restricted to settings.allowed_origins (wildcard only in dev_mode)
+  - ActionPlanner promoted to module-level singleton (rate limiter now persists)
+  - /health returns HTTP 503 when DynamoDB is unavailable
 
 Run:
     uvicorn main:app --reload --port 8000
@@ -47,9 +54,20 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+
+# ── Configure structured JSON logging FIRST ──────────────────────
+# Must be done before any other import that touches logging.
+from services.logging_config import (
+    configure_logging,
+    request_id_var,
+    household_id_var,
+    event_id_var,
+)
+configure_logging()
 
 from services.action_planner import ActionPlanner
 from services.bedrock_layer import BedrockLayer, BedrockCircuitBreaker, ContextBuilder
@@ -72,15 +90,14 @@ from schemas import NormalizedEvent
 from schemas.actions import Action, Notification
 from schemas.enums import ActionType, ImpactLevel, RouteDecision
 from schemas.websocket import WSEventType, WSMessage
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
 logger = logging.getLogger("saathi")
 
 HH_ID = settings.household_id
+
+# Protected endpoint prefixes — require X-API-Key when dev_mode=False
+_PROTECTED_PREFIXES = ("/admin", "/simulate", "/rules/reload", "/patterns/promote")
+# Paths always exempt from API key check (health probes, docs)
+_EXEMPT_PATHS = {"/health", "/docs", "/redoc", "/openapi.json", "/ws"}
 
 
 # ─────────────────────────────────────────────────────────────
@@ -142,6 +159,10 @@ pattern_engine = PatternEngine(graph_repo)
 metrics    = MetricsService(HH_ID)
 notif_svc  = NotificationService()
 cmd_bus    = DeviceCommandBus()
+# ── P1: ActionPlanner promoted to module-level singleton ────────────────
+# The _rate_tracker dict now persists across all requests on this pod.
+# broadcast_fn is injected per-request via plan(..., broadcast_fn=fn).
+action_planner = ActionPlanner()
 
 # Load promoted patterns for RTE Stage2
 _promoted_cache: list[dict] = []
@@ -199,15 +220,60 @@ app = FastAPI(
         "Smart Anticipatory Automation for The Home Intelligence — "
         "Two-Path Architecture: Rule Engine + AWS Bedrock"
     ),
-    version="2.0.0",
+    version="2.1.0",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,
 )
 
+# ── P1: Request Correlation ID middleware ─────────────────────────
+# Generates a UUID per request and stores it in a contextvar so every
+# logger call in the same coroutine automatically includes request_id.
+@app.middleware("http")
+async def correlation_id_middleware(request: Request, call_next):
+    rid = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    request_id_var.set(rid)
+    # Best-effort: set household_id from path param if present
+    path_parts = request.url.path.split("/")
+    if len(path_parts) >= 3 and path_parts[1] in ("graph", "ws"):
+        household_id_var.set(path_parts[2])
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = rid
+    return response
+
+
+# ── P1: API Key authentication middleware ──────────────────────
+# Bypassed entirely when dev_mode=True (default for tests + local dev).
+# In production (dev_mode=False), all non-exempt endpoints require
+# the X-API-Key header matching settings.api_key.
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):
+    if settings.dev_mode:
+        return await call_next(request)
+
+    # Always exempt: health probes, API docs, WebSocket upgrades
+    path = request.url.path
+    if path in _EXEMPT_PATHS or path.startswith("/ws"):
+        return await call_next(request)
+
+    api_key = request.headers.get("X-API-Key", "")
+    if api_key != settings.api_key:
+        logger.warning(f"Rejected request: missing/invalid X-API-Key path={path}")
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Missing or invalid X-API-Key header"},
+            headers={"X-Request-ID": request_id_var.get("")},
+        )
+    return await call_next(request)
+
+
+# ── P1: CORS ───────────────────────────────────────────────
+# dev_mode=True  → ["*"]  (preserves current open behaviour)
+# dev_mode=False → explicit list from ALLOWED_ORIGINS env var
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "*"],
+    allow_origins=settings.allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -227,7 +293,7 @@ async def run_full_pipeline(event: NormalizedEvent) -> dict[str, Any]:
     start = time.monotonic()
 
     # 1. Build context
-    context = ctx_engine.build(event, event.household_id)
+    context = await ctx_engine.build(event, event.household_id)
 
     # 2. RTE classify
     decision = rte_engine.classify(event, context.model_dump(mode="json"))
@@ -318,11 +384,12 @@ async def run_full_pipeline(event: NormalizedEvent) -> dict[str, Any]:
         # SUPPRESS
         metrics.record_suppressed()
 
-    # 4. Action Planner
-    planner = ActionPlanner(
-        broadcast_fn=lambda et, d: ws_manager.broadcast(event.household_id, et, d)
+    # 4. Action Planner — use module-level singleton; inject per-request broadcast_fn
+    approved = action_planner.plan(
+        proposed_actions,
+        context,
+        broadcast_fn=lambda et, d: ws_manager.broadcast(event.household_id, et, d),
     )
-    approved = planner.plan(proposed_actions, context)
 
     await ws_manager.broadcast(event.household_id, WSEventType.ACTION_PLANNED.value, {
         "event_id": event.event_id,
@@ -342,7 +409,7 @@ async def run_full_pipeline(event: NormalizedEvent) -> dict[str, Any]:
         })
 
         if action.action_type == ActionType.DEVICE_COMMAND:
-            result = cmd_bus.dispatch(action)
+            result = await cmd_bus.dispatch(action)
             metrics.record_action_dispatched()
             dispatched_results.append({
                 "action_id": action.action_id,
@@ -361,7 +428,7 @@ async def run_full_pipeline(event: NormalizedEvent) -> dict[str, Any]:
 
         elif action.action_type == ActionType.NOTIFICATION:
             notif = notif_svc.from_action(action)
-            sent = notif_svc.notify(notif)
+            sent = await notif_svc.notify(notif)
             if sent:
                 metrics.record_notification_sent()
             else:
@@ -415,15 +482,26 @@ async def websocket_endpoint(websocket: WebSocket, household_id: str):
 
 @app.get("/health", tags=["System"])
 async def health():
+    """
+    Liveness + readiness probe.
+    Returns HTTP 200 (healthy) or HTTP 503 (degraded).
+    DynamoDB unavailable → 503 so ALB/ECS stops routing to this pod.
+    """
     dynamo = health_check()
-    return {
-        "status": "ok",
-        "version": "2.0.0",
+    is_healthy = dynamo["status"] == "connected"
+    body = {
+        "status": "healthy" if is_healthy else "degraded",
+        "version": "2.1.0",
         "household_id": HH_ID,
         "bedrock_mock_mode": settings.bedrock_mock_mode,
         "dynamo": dynamo["status"],
+        "dynamo_region": dynamo.get("region", settings.aws_region),
+        "dev_mode": settings.dev_mode,
         "ws_connections": ws_manager.connection_count(HH_ID),
     }
+    if not is_healthy:
+        return JSONResponse(status_code=503, content=body)
+    return body
 
 
 @app.post("/admin/seed", tags=["Admin"])

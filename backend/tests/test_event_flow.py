@@ -29,8 +29,8 @@ def test_health_returns_ok(client):
     r = client.get("/health")
     assert r.status_code == 200
     data = r.json()
-    assert data["status"] == "ok"
-    assert data["version"] == "2.0.0"
+    assert data["status"] == "healthy"
+    assert data["version"] == "2.1.0"
     assert "dynamo" in data
 
 

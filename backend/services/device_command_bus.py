@@ -38,7 +38,7 @@ class DeviceCommandBus:
         # { "device_id:command": last_dispatch_timestamp }
         self._idem_cache: dict[str, float] = {}
 
-    def dispatch(self, action: Action) -> CommandResult:
+    async def dispatch(self, action: Action) -> CommandResult:
         """
         Dispatch a DEVICE_COMMAND action. Returns CommandResult.
         """
@@ -62,7 +62,7 @@ class DeviceCommandBus:
             )
 
         # Step 2: Capture pre-state (mock)
-        pre_state = self._get_device_state(device_id)
+        pre_state = await self._get_device_state(device_id)
 
         # Step 3: Dispatch (simulated)
         try:
@@ -97,7 +97,7 @@ class DeviceCommandBus:
         )
 
         # Step 5: Write to ActionLog (non-blocking)
-        self._write_action_log(action, result)
+        await self._write_action_log(action, result)
 
         logger.info(
             f"CommandBus: dispatched device={device_id} cmd={command} "
@@ -126,12 +126,14 @@ class DeviceCommandBus:
         post_state = _CMD_STATES.get(command, {"command_applied": command})
         return True, post_state, None
 
-    def _get_device_state(self, device_id: str) -> dict:
+    async def _get_device_state(self, device_id: str) -> dict:
         """Return last known device state from DynamoDB (best-effort)."""
         try:
+            from db.dynamo_client import async_execute
             table = get_table("household_graph")
             from boto3.dynamodb.conditions import Key, Attr
-            resp = table.query(
+            resp = await async_execute(
+                table.query,
                 KeyConditionExpression=Key("household_id").eq(settings.household_id),
                 FilterExpression=Attr("node_id").eq(device_id),
                 Limit=1,
@@ -143,11 +145,12 @@ class DeviceCommandBus:
             pass
         return {}
 
-    def _write_action_log(self, action: Action, result: CommandResult) -> None:
+    async def _write_action_log(self, action: Action, result: CommandResult) -> None:
         """Write dispatch record to ActionLog with 30-day TTL."""
         try:
             import asyncio
             from decimal import Decimal
+            from db.dynamo_client import async_execute
             table = get_table("action_log")
             ttl = int(time.time()) + (settings.ACTION_LOG_TTL_DAYS * 86400)
             item = {
@@ -165,6 +168,6 @@ class DeviceCommandBus:
             }
             if result.error:
                 item["error"] = result.error
-            table.put_item(Item=item)
+            await async_execute(table.put_item, Item=item)
         except Exception as e:
             logger.debug(f"ActionLog write failed (non-critical): {e}")

@@ -3,21 +3,38 @@ db/dynamo_client.py — DynamoDB Client
 Centralised boto3 DynamoDB resource.
 All table access goes through get_table() — never create boto3 resources elsewhere.
 Connection is verified on startup via health_check().
+
+Phase 1: Added botocore retry config (adaptive mode, 3 attempts, timeouts).
+Phase 2: Added asyncio.to_thread() helper for non-blocking DynamoDB I/O.
 """
 
+import asyncio
 import boto3
 import logging
+from botocore.config import Config
 from botocore.exceptions import ClientError, NoCredentialsError, EndpointResolutionError
 from config import settings
 
 logger = logging.getLogger(__name__)
 
-# Single boto3 resource (module-level, reused across all calls) 
+# ── Reliability config: adaptive retry + timeouts ────────────
+# adaptive mode: exponential backoff, jitter, honours Retry-After headers
+_retry_config = Config(
+    retries={
+        "max_attempts": settings.DYNAMO_MAX_ATTEMPTS,
+        "mode": "adaptive",
+    },
+    connect_timeout=settings.DYNAMO_CONNECT_TIMEOUT,
+    read_timeout=settings.DYNAMO_READ_TIMEOUT,
+)
+
+# Single boto3 resource (module-level, reused across all calls)
 _dynamodb = boto3.resource(
     "dynamodb",
     region_name=settings.aws_region,
     aws_access_key_id=settings.aws_access_key_id or None,
     aws_secret_access_key=settings.aws_secret_access_key or None,
+    config=_retry_config,
 )
 
 # All 7 table names from config
@@ -88,3 +105,16 @@ def health_check() -> dict:
             "region": settings.aws_region,
             "detail": str(e),
         }
+
+
+async def async_execute(func, *args, **kwargs):
+    """
+    Execute a synchronous boto3 DynamoDB call in a separate thread pool.
+    Usage:
+        table = get_table('my_table')
+        item = await async_execute(table.get_item, Key={'id': '123'})
+    """
+    import asyncio
+    import functools
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, functools.partial(func, *args, **kwargs))

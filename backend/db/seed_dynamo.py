@@ -13,6 +13,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from config import settings
@@ -174,20 +175,32 @@ def _floats_to_decimal(obj):
 
 
 def _get_client():
+    _cfg = Config(
+        retries={"max_attempts": settings.DYNAMO_MAX_ATTEMPTS, "mode": "adaptive"},
+        connect_timeout=settings.DYNAMO_CONNECT_TIMEOUT,
+        read_timeout=settings.DYNAMO_READ_TIMEOUT,
+    )
     return boto3.client(
         "dynamodb",
         region_name=settings.aws_region,
         aws_access_key_id=settings.aws_access_key_id or None,
         aws_secret_access_key=settings.aws_secret_access_key or None,
+        config=_cfg,
     )
 
 
 def _get_resource():
+    _cfg = Config(
+        retries={"max_attempts": settings.DYNAMO_MAX_ATTEMPTS, "mode": "adaptive"},
+        connect_timeout=settings.DYNAMO_CONNECT_TIMEOUT,
+        read_timeout=settings.DYNAMO_READ_TIMEOUT,
+    )
     return boto3.resource(
         "dynamodb",
         region_name=settings.aws_region,
         aws_access_key_id=settings.aws_access_key_id or None,
         aws_secret_access_key=settings.aws_secret_access_key or None,
+        config=_cfg,
     )
 
 
@@ -225,6 +238,22 @@ def create_tables() -> dict:
         for table_name in created:
             resource.Table(table_name).wait_until_exists()
             logger.info(f"  {table_name} is ACTIVE")
+
+        # Enable PITR on each newly created table
+        # PITR allows point-in-time recovery for up to 35 days
+        logger.info("Enabling Point-In-Time Recovery on all new tables...")
+        for table_name in created:
+            try:
+                client.update_continuous_backups(
+                    TableName=table_name,
+                    PointInTimeRecoverySpecification={
+                        "PointInTimeRecoveryEnabled": True
+                    },
+                )
+                logger.info(f"  PITR enabled: {table_name}")
+            except ClientError as e:
+                # Local DynamoDB (DynamoDB Local) does not support PITR— soft-fail
+                logger.warning(f"  PITR not available for {table_name}: {e.response['Error']['Code']}")
 
     return {"created": created, "skipped": skipped}
 

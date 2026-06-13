@@ -3,6 +3,11 @@ config.py — SAATHI Central Configuration
 =========================================
 Single source of truth for all environment variables and system constants.
 All modules import from here — never from os.environ directly.
+
+Phase 1 additions : API key auth, dev mode, CORS origins
+Phase 2 additions : boto3 retry constants
+Phase 3 additions : Redis connection
+Phase 4 additions : SQS connection
 """
 
 from pydantic_settings import BaseSettings
@@ -14,6 +19,50 @@ class Settings(BaseSettings):
     aws_region: str = Field(default="ap-south-1", alias="AWS_REGION")
     aws_access_key_id: str = Field(default="", alias="AWS_ACCESS_KEY_ID")
     aws_secret_access_key: str = Field(default="", alias="AWS_SECRET_ACCESS_KEY")
+
+    # ── Security / Auth ───────────────────────────────────
+    # dev_mode=True   → API key check skipped (safe for local dev & tests)
+    # dev_mode=False  → X-API-Key header required on protected endpoints
+    dev_mode: bool = Field(default=True, alias="DEV_MODE")
+    api_key: str = Field(default="dev-saathi-key-change-in-prod", alias="SAATHI_API_KEY")
+
+    # ── CORS ──────────────────────────────────────────────
+    # Comma-separated list of allowed origins, read from env.
+    # In dev_mode the wildcard is used automatically.
+    allowed_origins_str: str = Field(
+        default="http://localhost:5173,http://localhost:3000",
+        alias="ALLOWED_ORIGINS",
+    )
+
+    @property
+    def allowed_origins(self) -> list[str]:
+        if self.dev_mode:
+            return ["*"]
+        return [o.strip() for o in self.allowed_origins_str.split(",") if o.strip()]
+
+    # ── Redis ─────────────────────────────────────────────
+    # redis_enabled=False → all services fall back to in-memory (default)
+    # redis_enabled=True  → distributed state via ElastiCache / local Redis
+    redis_enabled: bool = Field(default=False, alias="REDIS_ENABLED")
+    redis_url: str = Field(default="redis://localhost:6379/0", alias="REDIS_URL")
+    redis_socket_timeout: float = Field(default=2.0, alias="REDIS_SOCKET_TIMEOUT")
+
+    # ── SQS ───────────────────────────────────────────────
+    # sqs_enabled=False → events processed synchronously in-process (default)
+    # sqs_enabled=True  → events enqueued in SQS, consumed by worker
+    sqs_enabled: bool = Field(default=False, alias="SQS_ENABLED")
+    sqs_queue_url: str = Field(default="", alias="SQS_QUEUE_URL")
+    sqs_dlq_url: str = Field(default="", alias="SQS_DLQ_URL")
+    sqs_visibility_timeout: int = Field(default=60, alias="SQS_VISIBILITY_TIMEOUT")
+
+    # ── CloudWatch Metrics ────────────────────────────────
+    cloudwatch_enabled: bool = Field(default=False, alias="CLOUDWATCH_ENABLED")
+    cloudwatch_namespace: str = Field(default="SAATHI", alias="CLOUDWATCH_NAMESPACE")
+
+    # ── boto3 Reliability ─────────────────────────────────
+    DYNAMO_MAX_ATTEMPTS: int = 3          # exponential backoff retries
+    DYNAMO_CONNECT_TIMEOUT: float = 5.0  # seconds
+    DYNAMO_READ_TIMEOUT: float = 10.0    # seconds
 
     # ── Bedrock ───────────────────────────────────────────
     bedrock_mock_mode: bool = Field(default=True, alias="BEDROCK_MOCK_MODE")

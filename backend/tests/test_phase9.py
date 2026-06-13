@@ -102,35 +102,40 @@ class TestContextEngine:
         self.presence.update(HH_ID, "mbr_dadaji_001", room_id="bedroom", is_home=True)
         self.engine = ContextEngine(presence=self.presence)
 
-    def test_build_returns_household_context(self):
+    @pytest.mark.asyncio
+    async def test_build_returns_household_context(self):
         event = make_event()
-        ctx = self.engine.build(event, HH_ID)
+        ctx = await self.engine.build(event, HH_ID)
         assert ctx.household_id == HH_ID
 
-    def test_time_of_day_is_set(self):
+    @pytest.mark.asyncio
+    async def test_time_of_day_is_set(self):
         event = make_event()
-        ctx = self.engine.build(event, HH_ID)
+        ctx = await self.engine.build(event, HH_ID)
         assert ctx.time_of_day in (
             "early_morning", "morning", "midday", "afternoon",
             "evening", "night", "late_night"
         )
 
-    def test_members_presence_reflects_service(self):
+    @pytest.mark.asyncio
+    async def test_members_presence_reflects_service(self):
         event = make_event()
-        ctx = self.engine.build(event, HH_ID)
+        ctx = await self.engine.build(event, HH_ID)
         ids = {m.member_id for m in ctx.members_presence}
         assert "mbr_dadaji_001" in ids
 
-    def test_context_has_ist_time(self):
+    @pytest.mark.asyncio
+    async def test_context_has_ist_time(self):
         event = make_event()
-        ctx = self.engine.build(event, HH_ID)
+        ctx = await self.engine.build(event, HH_ID)
         assert ctx.ist_time is not None
         assert ":" in ctx.ist_time  # HH:MM format
 
-    def test_context_has_day_of_week(self):
+    @pytest.mark.asyncio
+    async def test_context_has_day_of_week(self):
         from services.context_engine import _DAY_NAMES
         event = make_event()
-        ctx = self.engine.build(event, HH_ID)
+        ctx = await self.engine.build(event, HH_ID)
         assert ctx.day_of_week in _DAY_NAMES
 
 
