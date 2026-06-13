@@ -1,6 +1,5 @@
 """
 db/dynamo_client.py — DynamoDB Client
-=======================================
 Centralised boto3 DynamoDB resource.
 All table access goes through get_table() — never create boto3 resources elsewhere.
 Connection is verified on startup via health_check().
@@ -13,7 +12,7 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-# ── Single boto3 resource (module-level, reused across all calls) ──────────
+# Single boto3 resource (module-level, reused across all calls) 
 _dynamodb = boto3.resource(
     "dynamodb",
     region_name=settings.aws_region,
@@ -21,7 +20,7 @@ _dynamodb = boto3.resource(
     aws_secret_access_key=settings.aws_secret_access_key or None,
 )
 
-# ── All 7 table names from config ──────────────────────────────────────────
+# All 7 table names from config
 TABLE_NAMES = {
     "household_graph":    settings.table_household_graph,
     "household_rules":    settings.table_household_rules,

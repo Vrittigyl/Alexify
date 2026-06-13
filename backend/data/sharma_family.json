@@ -1,0 +1,323 @@
+{
+  "household_id": "hh_xk92p_sharma",
+  "family_name": "Sharma",
+  "location": "Jaipur, Rajasthan",
+
+  "nodes": {
+    "members": [
+      {
+        "node_id": "mbr_dadaji_001",
+        "name": "Dadaji",
+        "age": 72,
+        "role": "grandparent",
+        "language": "hindi",
+        "notification_channel": "alexa_voice",
+        "room": "master_bedroom"
+      },
+      {
+        "node_id": "mbr_dadiji_002",
+        "name": "Dadiji",
+        "age": 68,
+        "role": "grandparent",
+        "language": "hindi",
+        "notification_channel": "alexa_voice",
+        "room": "master_bedroom"
+      },
+      {
+        "node_id": "mbr_papa_003",
+        "name": "Rajesh",
+        "age": 45,
+        "role": "parent",
+        "language": "hindi",
+        "notification_channel": "mobile_push",
+        "room": "parents_bedroom"
+      },
+      {
+        "node_id": "mbr_mama_004",
+        "name": "Sunita",
+        "age": 42,
+        "role": "parent",
+        "language": "hindi",
+        "notification_channel": "whatsapp",
+        "room": "kitchen"
+      },
+      {
+        "node_id": "mbr_rohan_005",
+        "name": "Rohan",
+        "age": 17,
+        "role": "child",
+        "language": "hindi",
+        "notification_channel": "mobile_push",
+        "room": "kids_room"
+      },
+      {
+        "node_id": "mbr_ananya_006",
+        "name": "Ananya",
+        "age": 12,
+        "role": "child",
+        "language": "hindi",
+        "notification_channel": "alexa_voice",
+        "room": "kids_room"
+      }
+    ],
+
+    "devices": [
+      {
+        "node_id": "dev_water_motor_001",
+        "device_type": "water_motor",
+        "name": "Rooftop Water Motor",
+        "room": "terrace",
+        "primary_user": "mbr_papa_003"
+      },
+      {
+        "node_id": "dev_geyser_001",
+        "device_type": "geyser",
+        "name": "Bathroom Geyser",
+        "room": "bathroom",
+        "primary_user": "mbr_dadaji_001"
+      },
+      {
+        "node_id": "dev_pressure_cooker_001",
+        "device_type": "pressure_cooker",
+        "name": "Kitchen Pressure Cooker",
+        "room": "kitchen",
+        "primary_user": "mbr_mama_004"
+      },
+      {
+        "node_id": "dev_tv_001",
+        "device_type": "television",
+        "name": "Living Room TV",
+        "room": "living_room",
+        "primary_user": "mbr_rohan_005"
+      },
+      {
+        "node_id": "dev_fridge_001",
+        "device_type": "smart_fridge",
+        "name": "Kitchen Fridge",
+        "room": "kitchen",
+        "primary_user": "mbr_mama_004"
+      },
+      {
+        "node_id": "dev_ac_001",
+        "device_type": "ac",
+        "name": "Kids Room AC",
+        "room": "kids_room",
+        "primary_user": "mbr_rohan_005"
+      }
+    ],
+
+    "health_conditions": [
+      {
+        "node_id": "cond_hypertension",
+        "condition": "hypertension",
+        "severity": "moderate",
+        "diagnosed": "2019-03-01",
+        "notes": "Needs BP monitoring, low-sodium diet"
+      },
+      {
+        "node_id": "cond_diabetes_t2",
+        "condition": "type_2_diabetes",
+        "severity": "mild",
+        "diagnosed": "2020-06-15",
+        "notes": "Controlled with medication and diet"
+      },
+      {
+        "node_id": "cond_arthritis",
+        "condition": "knee_arthritis",
+        "severity": "moderate",
+        "diagnosed": "2021-01-10",
+        "notes": "Avoid cold exposure, morning stiffness common"
+      }
+    ],
+
+    "medications": [
+      {
+        "node_id": "med_amlodipine",
+        "name": "Amlodipine 5mg",
+        "schedule": "08:00",
+        "frequency": "daily",
+        "critical": true
+      },
+      {
+        "node_id": "med_metformin",
+        "name": "Metformin 500mg",
+        "schedule": "08:30",
+        "frequency": "daily",
+        "critical": true
+      },
+      {
+        "node_id": "med_evening_bp",
+        "name": "Telmisartan 40mg",
+        "schedule": "20:30",
+        "frequency": "daily",
+        "critical": true
+      },
+      {
+        "node_id": "med_calcium",
+        "name": "Calcium + Vitamin D",
+        "schedule": "13:00",
+        "frequency": "daily",
+        "critical": false
+      }
+    ],
+
+    "routines": [
+      {
+        "node_id": "rtn_dadaji_morning_walk",
+        "member_id": "mbr_dadaji_001",
+        "description": "Morning walk in park",
+        "time_window": "06:00-06:45",
+        "days": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+      },
+      {
+        "node_id": "rtn_dadaji_morning_meds",
+        "member_id": "mbr_dadaji_001",
+        "description": "Morning medication round",
+        "time_window": "08:00-08:30",
+        "days": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+      },
+      {
+        "node_id": "rtn_dadaji_evening_meds",
+        "member_id": "mbr_dadaji_001",
+        "description": "Evening BP medication",
+        "time_window": "20:30-21:00",
+        "days": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+      },
+      {
+        "node_id": "rtn_mama_morning_pooja",
+        "member_id": "mbr_mama_004",
+        "description": "Morning pooja and aarti",
+        "time_window": "06:30-07:00",
+        "days": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+      },
+      {
+        "node_id": "rtn_mama_cooking_lunch",
+        "member_id": "mbr_mama_004",
+        "description": "Lunch preparation (pressure cooker use)",
+        "time_window": "11:00-12:30",
+        "days": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+      },
+      {
+        "node_id": "rtn_mama_evening_chai",
+        "member_id": "mbr_mama_004",
+        "description": "Evening chai for family",
+        "time_window": "16:30-17:00",
+        "days": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+      },
+      {
+        "node_id": "rtn_papa_office",
+        "member_id": "mbr_papa_003",
+        "description": "Leaves for office",
+        "time_window": "09:00-09:30",
+        "days": ["Mon", "Tue", "Wed", "Thu", "Fri"]
+      },
+      {
+        "node_id": "rtn_papa_water_motor",
+        "member_id": "mbr_papa_003",
+        "description": "Turns on water motor before leaving",
+        "time_window": "08:30-08:45",
+        "days": ["Mon", "Wed", "Fri"]
+      },
+      {
+        "node_id": "rtn_rohan_school",
+        "member_id": "mbr_rohan_005",
+        "description": "School bus pickup",
+        "time_window": "07:30-08:00",
+        "days": ["Mon", "Tue", "Wed", "Thu", "Fri"]
+      },
+      {
+        "node_id": "rtn_rohan_study",
+        "member_id": "mbr_rohan_005",
+        "description": "Evening study time (boards prep)",
+        "time_window": "18:00-21:00",
+        "days": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+      },
+      {
+        "node_id": "rtn_ananya_tuition",
+        "member_id": "mbr_ananya_006",
+        "description": "Tuition class",
+        "time_window": "16:00-17:30",
+        "days": ["Mon", "Wed", "Fri"]
+      },
+      {
+        "node_id": "rtn_ananya_youtube",
+        "member_id": "mbr_ananya_006",
+        "description": "YouTube/screen time after homework",
+        "time_window": "17:30-18:30",
+        "days": ["Mon", "Tue", "Wed", "Thu", "Fri"]
+      },
+      {
+        "node_id": "rtn_dadiji_evening_bhajan",
+        "member_id": "mbr_dadiji_002",
+        "description": "Evening bhajan listening",
+        "time_window": "17:00-18:00",
+        "days": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+      }
+    ],
+
+    "life_events": [
+      {
+        "node_id": "le_rohan_boards",
+        "event": "board_exams",
+        "member_id": "mbr_rohan_005",
+        "description": "Rohan's Class 12 board exams",
+        "start_date": "2024-02-15",
+        "end_date": "2024-03-25",
+        "remaining_days": 6,
+        "impact": "high",
+        "affects": ["mbr_rohan_005", "mbr_mama_004", "mbr_papa_003"],
+        "constraints": [
+          "quiet_hours_after_21:00",
+          "no_tv_during_study_hours",
+          "reduce_guest_notifications"
+        ]
+      }
+    ]
+  },
+
+  "edges": [
+    {"from": "mbr_dadaji_001", "type": "HAS_CONDITION", "to": "cond_hypertension", "severity": "moderate"},
+    {"from": "mbr_dadaji_001", "type": "HAS_CONDITION", "to": "cond_diabetes_t2", "severity": "mild"},
+    {"from": "mbr_dadaji_001", "type": "HAS_CONDITION", "to": "cond_arthritis", "severity": "moderate"},
+
+    {"from": "mbr_dadaji_001", "type": "TAKES", "to": "med_amlodipine", "schedule": "08:00"},
+    {"from": "mbr_dadaji_001", "type": "TAKES", "to": "med_metformin", "schedule": "08:30"},
+    {"from": "mbr_dadaji_001", "type": "TAKES", "to": "med_evening_bp", "schedule": "20:30"},
+    {"from": "mbr_dadiji_002", "type": "TAKES", "to": "med_calcium", "schedule": "13:00"},
+
+    {"from": "mbr_dadaji_001", "type": "FOLLOWS", "to": "rtn_dadaji_morning_walk"},
+    {"from": "mbr_dadaji_001", "type": "FOLLOWS", "to": "rtn_dadaji_morning_meds"},
+    {"from": "mbr_dadaji_001", "type": "FOLLOWS", "to": "rtn_dadaji_evening_meds"},
+    {"from": "mbr_dadiji_002", "type": "FOLLOWS", "to": "rtn_dadiji_evening_bhajan"},
+    {"from": "mbr_mama_004", "type": "FOLLOWS", "to": "rtn_mama_morning_pooja"},
+    {"from": "mbr_mama_004", "type": "FOLLOWS", "to": "rtn_mama_cooking_lunch"},
+    {"from": "mbr_mama_004", "type": "FOLLOWS", "to": "rtn_mama_evening_chai"},
+    {"from": "mbr_papa_003", "type": "FOLLOWS", "to": "rtn_papa_office"},
+    {"from": "mbr_papa_003", "type": "FOLLOWS", "to": "rtn_papa_water_motor"},
+    {"from": "mbr_rohan_005", "type": "FOLLOWS", "to": "rtn_rohan_school"},
+    {"from": "mbr_rohan_005", "type": "FOLLOWS", "to": "rtn_rohan_study"},
+    {"from": "mbr_ananya_006", "type": "FOLLOWS", "to": "rtn_ananya_tuition"},
+    {"from": "mbr_ananya_006", "type": "FOLLOWS", "to": "rtn_ananya_youtube"},
+
+    {"from": "le_rohan_boards", "type": "DIRECTLY_AFFECTS", "to": "mbr_rohan_005", "impact": "high"},
+    {"from": "le_rohan_boards", "type": "DIRECTLY_AFFECTS", "to": "mbr_mama_004", "impact": "medium"},
+    {"from": "le_rohan_boards", "type": "DIRECTLY_AFFECTS", "to": "mbr_papa_003", "impact": "medium"},
+
+    {"from": "dev_water_motor_001", "type": "LOCATED_IN", "to": "terrace"},
+    {"from": "dev_geyser_001", "type": "LOCATED_IN", "to": "bathroom"},
+    {"from": "dev_pressure_cooker_001", "type": "LOCATED_IN", "to": "kitchen"},
+    {"from": "dev_tv_001", "type": "LOCATED_IN", "to": "living_room"},
+    {"from": "dev_fridge_001", "type": "LOCATED_IN", "to": "kitchen"},
+    {"from": "dev_ac_001", "type": "LOCATED_IN", "to": "kids_room"},
+
+    {"from": "mbr_papa_003", "type": "PRIMARY_USER_OF", "to": "dev_water_motor_001"},
+    {"from": "mbr_dadaji_001", "type": "PRIMARY_USER_OF", "to": "dev_geyser_001"},
+    {"from": "mbr_mama_004", "type": "PRIMARY_USER_OF", "to": "dev_pressure_cooker_001"},
+    {"from": "mbr_rohan_005", "type": "PRIMARY_USER_OF", "to": "dev_tv_001"},
+    {"from": "mbr_mama_004", "type": "PRIMARY_USER_OF", "to": "dev_fridge_001"},
+    {"from": "mbr_rohan_005", "type": "PRIMARY_USER_OF", "to": "dev_ac_001"},
+
+    {"from": "rtn_rohan_study", "type": "CONFLICTS_WITH", "to": "dev_tv_001", "reason": "No TV during board exam study"},
+    {"from": "cond_arthritis", "type": "CONFLICTS_WITH", "to": "dev_ac_001", "reason": "Cold air worsens joint stiffness for Dadaji"}
+  ]
+}

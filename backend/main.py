@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import settings
 from db.dynamo_client import health_check
 
-# ── Logging ────────────────────────────────────────────────────────────────
+# Logging 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
@@ -24,7 +24,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("saathi")
 
-# ── App ────────────────────────────────────────────────────────────────────
+# App 
 app = FastAPI(
     title="SAATHI",
     description=(
@@ -36,7 +36,7 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# ── CORS (allow frontend dev server) ──────────────────────────────────────
+# CORS (allow frontend dev server)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:3000"],
@@ -45,7 +45,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Startup ────────────────────────────────────────────────────────────────
+# Startup 
 @app.on_event("startup")
 async def on_startup():
     logger.info("=" * 60)
@@ -66,7 +66,7 @@ async def on_startup():
     logger.info("  SAATHI ready.")
 
 
-# ── Health ─────────────────────────────────────────────────────────────────
+# Health 
 @app.get("/health", tags=["System"])
 async def health():
     """
@@ -86,6 +86,6 @@ async def health():
     }
 
 
-# ── Entrypoint ─────────────────────────────────────────────────────────────
+# Entrypoint 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

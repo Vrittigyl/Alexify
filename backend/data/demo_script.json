@@ -1,0 +1,165 @@
+[
+  {
+    "t_seconds": 0,
+    "event_name": "Water Motor On",
+    "description": "Papa turns on water motor before leaving for office",
+    "device_type": "water_motor",
+    "device_id": "dev_water_motor_001",
+    "raw_payload": {
+      "state": "on",
+      "tank_level_percent": 30,
+      "flow_rate_lpm": 18.5,
+      "timestamp": "2024-01-15T08:32:00+05:30"
+    },
+    "expected_route": "RULE_ENGINE",
+    "expected_rule": null,
+    "notes": "No rule fires yet — tank is low. Just ingested and logged."
+  },
+  {
+    "t_seconds": 15,
+    "event_name": "Tank Filling Up",
+    "description": "Tank level rising normally",
+    "device_type": "water_motor",
+    "device_id": "dev_water_motor_001",
+    "raw_payload": {
+      "state": "on",
+      "tank_level_percent": 65,
+      "flow_rate_lpm": 18.2,
+      "timestamp": "2024-01-15T08:47:00+05:30"
+    },
+    "expected_route": "SUPPRESS",
+    "expected_rule": null,
+    "notes": "Duplicate suppressed or no action needed — tank still filling."
+  },
+  {
+    "t_seconds": 30,
+    "event_name": "Tank Full — Safety Rule Fires",
+    "description": "Tank reaches 96%. Safety rule auto-shuts the motor.",
+    "device_type": "water_motor",
+    "device_id": "dev_water_motor_001",
+    "raw_payload": {
+      "state": "on",
+      "tank_level_percent": 96,
+      "flow_rate_lpm": 5.1,
+      "timestamp": "2024-01-15T09:05:00+05:30"
+    },
+    "expected_route": "RULE_ENGINE",
+    "expected_rule": "rl_water_motor_tank_full",
+    "notes": "Safety-critical rule. Must execute in <50ms with zero AI."
+  },
+  {
+    "t_seconds": 50,
+    "event_name": "Pressure Cooker Starts",
+    "description": "Sunita starts lunch preparation",
+    "device_type": "pressure_cooker",
+    "device_id": "dev_pressure_cooker_001",
+    "raw_payload": {
+      "state": "on",
+      "whistle_count": 0,
+      "temperature_c": 100,
+      "timestamp": "2024-01-15T11:05:00+05:30"
+    },
+    "expected_route": "RULE_ENGINE",
+    "expected_rule": null,
+    "notes": "No rule fires — cooker just started. Pattern engine may observe."
+  },
+  {
+    "t_seconds": 70,
+    "event_name": "Cooker 5 Whistles",
+    "description": "Pressure cooker hits 5 whistles — safety alert fires",
+    "device_type": "pressure_cooker",
+    "device_id": "dev_pressure_cooker_001",
+    "raw_payload": {
+      "state": "on",
+      "whistle_count": 5,
+      "temperature_c": 121,
+      "timestamp": "2024-01-15T11:25:00+05:30"
+    },
+    "expected_route": "RULE_ENGINE",
+    "expected_rule": "rl_pressure_cooker_whistle_limit",
+    "notes": "Safety rule fires: voice + mobile notification to turn off gas."
+  },
+  {
+    "t_seconds": 90,
+    "event_name": "Dadaji Evening Medicine Time",
+    "description": "Schedule trigger for Dadaji's evening BP medication",
+    "device_type": null,
+    "device_id": null,
+    "raw_payload": {
+      "event_type": "schedule_event",
+      "schedule_id": "rtn_dadaji_evening_meds",
+      "member_id": "mbr_dadaji_001",
+      "timestamp": "2024-01-15T20:30:00+05:30"
+    },
+    "expected_route": "RULE_ENGINE",
+    "expected_rule": "rl_dadaji_medicine_evening_promoted",
+    "notes": "Promoted pattern rule fires. Sends Hindi voice reminder to Dadaji."
+  },
+  {
+    "t_seconds": 110,
+    "event_name": "TV Volume During Study Hours",
+    "description": "Someone turns up TV volume during Rohan's board exam study time",
+    "device_type": "television",
+    "device_id": "dev_tv_001",
+    "raw_payload": {
+      "state": "on",
+      "volume_percent": 65,
+      "channel": "Sony SET",
+      "timestamp": "2024-01-15T21:15:00+05:30"
+    },
+    "expected_route": "RULE_ENGINE",
+    "expected_rule": "rl_quiet_hours_rohan_boards",
+    "notes": "Custom rule fires: auto-reduces volume to 20 during board exam quiet hours."
+  },
+  {
+    "t_seconds": 130,
+    "event_name": "Guest Arrival — Complex Event",
+    "description": "Unexpected guest arrives during dinner time. Requires Bedrock reasoning.",
+    "device_type": null,
+    "device_id": null,
+    "raw_payload": {
+      "event_type": "guest_arrival",
+      "guest_count": 3,
+      "relation": "extended_family",
+      "arrival_time": "2024-01-15T19:45:00+05:30",
+      "expected_stay_hours": 2
+    },
+    "expected_route": "BEDROCK",
+    "expected_rule": null,
+    "notes": "No rule covers guest arrivals. RTE routes to Bedrock for multi-member reasoning."
+  },
+  {
+    "t_seconds": 155,
+    "event_name": "Rohan Board Exams Life Event",
+    "description": "Life event: Rohan's boards start in 6 days. Affects schedules across family.",
+    "device_type": null,
+    "device_id": null,
+    "raw_payload": {
+      "event_type": "life_event",
+      "event": "board_exams",
+      "member_id": "mbr_rohan_005",
+      "remaining_days": 6,
+      "constraints": ["quiet_hours", "reduce_distractions", "nutritious_meals"],
+      "timestamp": "2024-01-15T09:00:00+05:30"
+    },
+    "expected_route": "BEDROCK",
+    "expected_rule": null,
+    "notes": "Life events always route to Bedrock. Requires multi-member coordination."
+  },
+  {
+    "t_seconds": 180,
+    "event_name": "Fridge Door Left Open",
+    "description": "Fridge door open for over 3 minutes — fleet rule fires",
+    "device_type": "smart_fridge",
+    "device_id": "dev_fridge_001",
+    "raw_payload": {
+      "state": "door_open",
+      "door_open_seconds": 210,
+      "temperature_c": 8.2,
+      "timestamp": "2024-01-15T14:30:00+05:30"
+    },
+    "expected_route": "RULE_ENGINE",
+    "expected_rule": "rl_fridge_door_open",
+    "notes": "Fleet default rule fires. Voice alert to close the fridge."
+  }
+]

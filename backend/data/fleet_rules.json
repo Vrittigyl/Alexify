@@ -1,0 +1,231 @@
+[
+  {
+    "household_id": "FLEET",
+    "rule_id": "rl_water_motor_tank_full",
+    "rule_type": "safety",
+    "rule_version": 3,
+    "name": "Water Motor Auto-Off (Tank Full)",
+    "description": "Turn off water motor when tank reaches 95%. Prevents overflow and motor burn-out.",
+    "trigger": {
+      "device_type": "water_motor",
+      "field": "tank_level_percent",
+      "op": "gte",
+      "value": 95
+    },
+    "conditions": [],
+    "action": {
+      "type": "device_command",
+      "command": "turn_off"
+    },
+    "safety_critical": true,
+    "override_allowed": false,
+    "idempotency_window_secs": 120
+  },
+  {
+    "household_id": "FLEET",
+    "rule_id": "rl_geyser_auto_off_30min",
+    "rule_type": "safety",
+    "rule_version": 2,
+    "name": "Geyser Auto-Off (30 min)",
+    "description": "Turn off geyser after 30 minutes to prevent overheating and save electricity.",
+    "trigger": {
+      "device_type": "geyser",
+      "field": "running_minutes",
+      "op": "gte",
+      "value": 30
+    },
+    "conditions": [],
+    "action": {
+      "type": "device_command",
+      "command": "turn_off"
+    },
+    "safety_critical": true,
+    "override_allowed": true,
+    "idempotency_window_secs": 300
+  },
+  {
+    "household_id": "FLEET",
+    "rule_id": "rl_power_cut_safety",
+    "rule_type": "safety",
+    "rule_version": 1,
+    "name": "Power Cut Device Safety",
+    "description": "When power goes out, ensure geyser and motor are off so they don't restart unexpectedly when power returns.",
+    "trigger": {
+      "event_type": "device_state",
+      "field": "power_status",
+      "op": "eq",
+      "value": "power_cut"
+    },
+    "conditions": [],
+    "action": {
+      "type": "notification",
+      "message_template": "Power cut detected. Geyser and water motor have been secured.",
+      "channel": "alexa_voice"
+    },
+    "safety_critical": true,
+    "override_allowed": false
+  },
+  {
+    "household_id": "hh_xk92p_sharma",
+    "rule_id": "rl_dadaji_morning_meds",
+    "rule_type": "health",
+    "rule_version": 2,
+    "name": "Dadaji Morning Medication Reminder",
+    "description": "Remind Dadaji to take Amlodipine and Metformin at 08:00.",
+    "trigger": {
+      "event_type": "schedule_event",
+      "field": "schedule_id",
+      "op": "eq",
+      "value": "rtn_dadaji_morning_meds"
+    },
+    "conditions": [
+      {
+        "field": "context.members_presence",
+        "op": "contains_member_home",
+        "value": "mbr_dadaji_001",
+        "on_fail": "escalate_to_bedrock"
+      }
+    ],
+    "action": {
+      "type": "reminder",
+      "message_template": "Dadaji, subah ki dawai ka time ho gaya hai. Amlodipine aur Metformin le lijiye.",
+      "channel": "alexa_voice",
+      "target_member_ids": ["mbr_dadaji_001"]
+    },
+    "safety_critical": false,
+    "override_allowed": true
+  },
+  {
+    "household_id": "hh_xk92p_sharma",
+    "rule_id": "rl_dadaji_dietary_alert",
+    "rule_type": "health",
+    "rule_version": 1,
+    "name": "Dadaji Dietary Alert (High Sodium)",
+    "description": "Warn when fridge detects high-sodium food items being accessed frequently.",
+    "trigger": {
+      "device_type": "smart_fridge",
+      "field": "item_category",
+      "op": "eq",
+      "value": "high_sodium"
+    },
+    "conditions": [
+      {
+        "field": "context.active_life_events",
+        "op": "not_contains",
+        "value": "festival",
+        "on_fail": "skip"
+      }
+    ],
+    "action": {
+      "type": "notification",
+      "message_template": "Sunita ji, Dadaji ke liye high-sodium items zyada access ho rahe hain. Unka BP ka dhyan rakhein.",
+      "channel": "whatsapp",
+      "target_member_ids": ["mbr_mama_004"]
+    },
+    "safety_critical": false,
+    "override_allowed": true
+  },
+  {
+    "household_id": "hh_xk92p_sharma",
+    "rule_id": "rl_quiet_hours_rohan_boards",
+    "rule_type": "custom",
+    "rule_version": 1,
+    "name": "Quiet Hours During Board Exams",
+    "description": "After 9 PM during Rohan's board exams, reduce TV volume and dim living room lights.",
+    "trigger": {
+      "device_type": "television",
+      "field": "volume_percent",
+      "op": "gte",
+      "value": 40
+    },
+    "conditions": [
+      {
+        "field": "context.time_of_day",
+        "op": "in",
+        "value": ["evening", "night"]
+      },
+      {
+        "field": "context.active_life_events",
+        "op": "contains_event",
+        "value": "board_exams"
+      }
+    ],
+    "action": {
+      "type": "device_command",
+      "command": "set_volume_20"
+    },
+    "safety_critical": false,
+    "override_allowed": true
+  },
+  {
+    "household_id": "hh_xk92p_sharma",
+    "rule_id": "rl_dadaji_medicine_evening_promoted",
+    "rule_type": "promoted_pattern",
+    "rule_version": 1,
+    "name": "Dadaji Evening BP Medicine (Promoted Pattern)",
+    "description": "Observed pattern promoted to rule: Dadaji consistently takes Telmisartan at 20:30.",
+    "trigger": {
+      "event_type": "schedule_event",
+      "field": "schedule_id",
+      "op": "eq",
+      "value": "rtn_dadaji_evening_meds"
+    },
+    "conditions": [],
+    "action": {
+      "type": "reminder",
+      "message_template": "Dadaji, shaam ki BP ki dawai le lijiye — Telmisartan.",
+      "channel": "alexa_voice",
+      "target_member_ids": ["mbr_dadaji_001"]
+    },
+    "safety_critical": false,
+    "override_allowed": true,
+    "source_pattern_id": "ptn_dadaji_medicine_evening",
+    "observation_days": 47,
+    "original_confidence": 0.93,
+    "demotion_trigger": "3_consecutive_misses"
+  },
+  {
+    "household_id": "FLEET",
+    "rule_id": "rl_fridge_door_open",
+    "rule_type": "fleet",
+    "rule_version": 1,
+    "name": "Fridge Door Left Open",
+    "description": "Alert if fridge door is open for more than 3 minutes.",
+    "trigger": {
+      "device_type": "smart_fridge",
+      "field": "door_open_seconds",
+      "op": "gte",
+      "value": 180
+    },
+    "conditions": [],
+    "action": {
+      "type": "notification",
+      "message_template": "Fridge ka darwaza 3 minute se khula hai. Band kar dijiye.",
+      "channel": "alexa_voice"
+    },
+    "safety_critical": false,
+    "override_allowed": true
+  },
+  {
+    "household_id": "FLEET",
+    "rule_id": "rl_pressure_cooker_whistle_limit",
+    "rule_type": "safety",
+    "rule_version": 1,
+    "name": "Pressure Cooker Whistle Limit",
+    "description": "Alert after 5 whistles to prevent overcooking and potential safety hazard.",
+    "trigger": {
+      "device_type": "pressure_cooker",
+      "field": "whistle_count",
+      "op": "gte",
+      "value": 5
+    },
+    "conditions": [],
+    "action": {
+      "type": "notification",
+      "message_template": "Cooker mein 5 seeti ho gayi hain. Gas band kar dijiye.",
+      "channel": "voice_and_mobile"
+    },
+    "safety_critical": true,
+    "override_allowed": false
+  }
+]
