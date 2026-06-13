@@ -1,21 +1,78 @@
 """
-main.py — SAATHI FastAPI Application
-Entry point for the backend.
+main.py — SAATHI FastAPI Application v2.0
+==========================================
+Phase 10: Full pipeline wired. WebSocket hub. 13 REST endpoints.
 
 Run:
     uvicorn main:app --reload --port 8000
+
+Endpoints:
+  System:
+    GET  /health
+    POST /admin/seed
+
+  Events:
+    POST /events/ingest          — raw device payload → full pipeline
+    POST /simulate/event/{name}  — fire named demo event
+
+  RTE:
+    GET  /rte/decision/{event_id}
+
+  Metrics:
+    GET  /metrics
+    GET  /metrics/circuit-breaker
+
+  Knowledge Graph:
+    GET  /graph/{household_id}
+    GET  /graph/{household_id}/members
+    GET  /graph/{household_id}/devices
+
+  Rules:
+    GET  /rules
+    POST /rules/reload
+
+  Patterns:
+    GET  /patterns
+    POST /patterns/promote
+
+  WebSocket:
+    WS   /ws/{household_id}
 """
 
+import asyncio
 import logging
-import uvicorn
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+import time
+import uuid
+from contextlib import asynccontextmanager
+from typing import Any
 
+import uvicorn
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+from action_planner import ActionPlanner
+from bedrock_layer import BedrockLayer, BedrockCircuitBreaker, ContextBuilder
 from config import settings
+from context_engine import ContextEngine
 from db.dynamo_client import health_check
 from db.seed_dynamo import run_full_seed
+from device_command_bus import DeviceCommandBus
+from event_batcher import EventBatcher
+from event_simulator import EventSimulator
+from graph_repository import GraphRepository
+from knowledge_graph import KnowledgeGraph
+from metrics_service import MetricsService
+from notification_service import NotificationService
+from pattern_engine import PatternEngine
+from presence_service import PresenceService
+from rule_engine import RuleEngine
+from rte import RTE
+from schemas import NormalizedEvent
+from schemas.actions import Action, Notification
+from schemas.enums import ActionType, ImpactLevel, RouteDecision
+from schemas.websocket import WSEventType, WSMessage
 
-# Logging 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
@@ -23,7 +80,119 @@ logging.basicConfig(
 )
 logger = logging.getLogger("saathi")
 
-# App 
+HH_ID = settings.household_id
+
+
+# ─────────────────────────────────────────────────────────────
+# 10.6  WebSocket ConnectionManager
+# ─────────────────────────────────────────────────────────────
+
+class ConnectionManager:
+    """Maintains per-household WebSocket connections and broadcasts typed messages."""
+
+    def __init__(self):
+        self._connections: dict[str, list[WebSocket]] = {}
+
+    async def connect(self, household_id: str, ws: WebSocket) -> None:
+        await ws.accept()
+        self._connections.setdefault(household_id, []).append(ws)
+        logger.info(f"WS: connected household={household_id} total={len(self._connections[household_id])}")
+
+    def disconnect(self, household_id: str, ws: WebSocket) -> None:
+        conns = self._connections.get(household_id, [])
+        if ws in conns:
+            conns.remove(ws)
+
+    async def broadcast(self, household_id: str, event_type: str, data: dict) -> None:
+        msg = WSMessage(
+            type=WSEventType(event_type),
+            household_id=household_id,
+            data=data,
+        )
+        payload = msg.model_dump(mode="json")
+        stale = []
+        for ws in self._connections.get(household_id, []):
+            try:
+                await ws.send_json(payload)
+            except Exception:
+                stale.append(ws)
+        for ws in stale:
+            self.disconnect(household_id, ws)
+
+    def connection_count(self, household_id: str) -> int:
+        return len(self._connections.get(household_id, []))
+
+
+# ─────────────────────────────────────────────────────────────
+# Singletons — shared across all requests
+# ─────────────────────────────────────────────────────────────
+
+ws_manager = ConnectionManager()
+
+graph_repo = GraphRepository()
+presence   = PresenceService()
+kg         = KnowledgeGraph(graph_repo)
+ctx_engine = ContextEngine(graph_repo, presence)
+rule_engine = RuleEngine()
+circuit_breaker = BedrockCircuitBreaker()
+bedrock    = BedrockLayer(circuit_breaker=circuit_breaker, mock_mode=settings.bedrock_mock_mode)
+ctx_builder = ContextBuilder()
+batcher    = EventBatcher()
+pattern_engine = PatternEngine(graph_repo)
+metrics    = MetricsService(HH_ID)
+notif_svc  = NotificationService()
+cmd_bus    = DeviceCommandBus()
+
+# Load promoted patterns for RTE Stage2
+_promoted_cache: list[dict] = []
+rte_engine: RTE | None = None
+
+
+# ─────────────────────────────────────────────────────────────
+# Lifespan
+# ─────────────────────────────────────────────────────────────
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global rte_engine, _promoted_cache
+    logger.info("=" * 60)
+    logger.info("  SAATHI v2.0 — Starting up")
+    logger.info(f"  Household    : {HH_ID}")
+    logger.info(f"  Bedrock Mock : {settings.bedrock_mock_mode}")
+    logger.info(f"  RTE Threshold: {settings.bedrock_complexity_threshold}")
+    logger.info("=" * 60)
+
+    dynamo = health_check()
+    logger.info(f"  DynamoDB: {dynamo['status']}")
+
+    # Boot rule registry
+    rule_engine._registry.load(HH_ID)
+
+    # Boot promoted patterns for RTE Stage2
+    _promoted_cache = graph_repo.get_patterns(HH_ID, band="PROMOTED")
+    rte_engine = RTE(rule_registry=rule_engine._registry, promoted_patterns=_promoted_cache)
+
+    # Update metrics pattern counts
+    all_patterns = graph_repo.get_patterns(HH_ID)
+    promoted = [p for p in all_patterns if p.get("confidence_band") == "PROMOTED"]
+    metrics.update_pattern_counts(
+        active=len(all_patterns),
+        promoted=len(promoted),
+        learning=len([p for p in all_patterns if p.get("confidence_band") == "LEARNING"]),
+        observing=len([p for p in all_patterns if p.get("confidence_band") == "OBSERVING"]),
+    )
+
+    logger.info(f"  Rules loaded : {len(rule_engine._registry._raw_rules)}")
+    logger.info(f"  Patterns     : {len(all_patterns)} ({len(promoted)} promoted)")
+    logger.info("  SAATHI ready.")
+    yield
+    logger.info("  SAATHI shutting down.")
+
+
+# ─────────────────────────────────────────────────────────────
+# App
+# ─────────────────────────────────────────────────────────────
+
 app = FastAPI(
     title="SAATHI",
     description=(
@@ -33,65 +202,232 @@ app = FastAPI(
     version="2.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
-# CORS (allow frontend dev server)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=["http://localhost:5173", "http://localhost:3000", "*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Startup 
-@app.on_event("startup")
-async def on_startup():
-    logger.info("=" * 60)
-    logger.info("  SAATHI v2.0 — Starting up")
-    logger.info(f"  Household ID    : {settings.household_id}")
-    logger.info(f"  AWS Region      : {settings.aws_region}")
-    logger.info(f"  Bedrock Mock    : {settings.bedrock_mock_mode}")
-    logger.info(f"  Complexity Thr  : {settings.bedrock_complexity_threshold}")
-    logger.info("=" * 60)
 
-    dynamo_status = health_check()
-    logger.info(f"  DynamoDB status : {dynamo_status['status']}")
-    if dynamo_status["status"] == "connected":
-        logger.info(f"  DynamoDB region : {dynamo_status['region']}")
+# ─────────────────────────────────────────────────────────────
+# Full pipeline function
+# ─────────────────────────────────────────────────────────────
+
+async def run_full_pipeline(event: NormalizedEvent) -> dict[str, Any]:
+    """
+    Routes an event through the complete SAATHI pipeline:
+    RTE → Rule Engine OR Bedrock → Action Planner → Dispatch
+    Returns a result dict suitable for both API responses and WebSocket broadcast.
+    """
+    start = time.monotonic()
+
+    # 1. Build context
+    context = ctx_engine.build(event, event.household_id)
+
+    # 2. RTE classify
+    decision = rte_engine.classify(event, context.model_dump(mode="json"))
+    route = decision.route
+
+    # Emit RTE decision via WebSocket
+    await ws_manager.broadcast(event.household_id, WSEventType.RTE_DECISION.value, {
+        "event_id": event.event_id,
+        "route": route.value,
+        "stage": decision.stage_decided,
+        "score": decision.complexity_score,
+        "rule_matched": decision.rule_matched,
+        "pattern_matched": decision.pattern_matched,
+    })
+
+    proposed_actions: list[Action] = []
+    bedrock_response = None
+
+    # 3. Route
+    if route == RouteDecision.RULE_ENGINE:
+        re_start = time.monotonic()
+        proposed_actions = rule_engine.run(event)
+        re_latency = (time.monotonic() - re_start) * 1000
+        metrics.record_rule_engine(re_latency)
+
+        await ws_manager.broadcast(event.household_id, WSEventType.RULE_ENGINE_RESULT.value, {
+            "event_id": event.event_id,
+            "actions_count": len(proposed_actions),
+            "latency_ms": round(re_latency, 1),
+        })
+
+    elif route == RouteDecision.BEDROCK:
+        bk_start = time.monotonic()
+        batcher.add(event)
+
+        # Build bedrock context
+        batch = batcher.flush(event.household_id) or [event]
+        rule_handled = [decision.rule_matched] if decision.rule_matched else []
+        bedrock_ctx = ctx_builder.build_bedrock_context(
+            batch, context,
+            rule_engine_already_handled=rule_handled,
+        )
+
+        await ws_manager.broadcast(event.household_id, WSEventType.BEDROCK_REQUEST.value, {
+            "event_id": event.event_id,
+            "estimated_tokens": bedrock_ctx.estimated_tokens,
+        })
+
+        bedrock_response = bedrock.invoke(bedrock_ctx, event.household_id)
+        bk_latency = (time.monotonic() - bk_start) * 1000
+        metrics.record_bedrock(bk_latency, bedrock_response.total_tokens)
+        metrics.update_circuit_breaker(circuit_breaker.state)
+
+        await ws_manager.broadcast(event.household_id, WSEventType.BEDROCK_RESPONSE.value, {
+            "event_id": event.event_id,
+            "actions_count": len(bedrock_response.actions),
+            "tokens": bedrock_response.total_tokens,
+            "confidence": bedrock_response.confidence,
+            "latency_ms": round(bk_latency, 1),
+        })
+
+        # Convert Bedrock raw action dicts → Action objects
+        from schemas.enums import ActionSource, NotificationChannel
+        for raw in bedrock_response.actions:
+            at = raw.get("action_type", "notification")
+            try:
+                action = Action(
+                    household_id=event.household_id,
+                    action_type=ActionType(at),
+                    source=ActionSource.BEDROCK,
+                    device_id=raw.get("device_id"),
+                    command=raw.get("command"),
+                    target_member_ids=raw.get("target_member_ids", []),
+                    message=raw.get("message"),
+                    channel=NotificationChannel(raw["channel"]) if raw.get("channel") else None,
+                    bedrock_request_id=bedrock_response.request_id,
+                    event_id=event.event_id,
+                )
+                proposed_actions.append(action)
+            except Exception as e:
+                logger.warning(f"Pipeline: could not convert Bedrock action: {e}")
+
+        # Ingest suggested patterns
+        if bedrock_response.suggested_patterns:
+            pattern_engine.ingest_suggestions(event.household_id, bedrock_response.suggested_patterns)
+
     else:
-        logger.warning(f"  DynamoDB detail : {dynamo_status.get('detail', '')}")
+        # SUPPRESS
+        metrics.record_suppressed()
 
-    logger.info("  SAATHI ready.")
+    # 4. Action Planner
+    planner = ActionPlanner(
+        broadcast_fn=lambda et, d: ws_manager.broadcast(event.household_id, et, d)
+    )
+    approved = planner.plan(proposed_actions, context)
+
+    await ws_manager.broadcast(event.household_id, WSEventType.ACTION_PLANNED.value, {
+        "event_id": event.event_id,
+        "proposed": len(proposed_actions),
+        "approved": len(approved),
+    })
+
+    # 5. Dispatch
+    dispatched_results = []
+    for action in approved:
+        await ws_manager.broadcast(event.household_id, WSEventType.ACTION_PLANNED.value, {
+            "action_id": action.action_id,
+            "action_type": action.action_type.value,
+            "device_id": action.device_id,
+            "command": action.command,
+            "source": action.source.value,
+        })
+
+        if action.action_type == ActionType.DEVICE_COMMAND:
+            result = cmd_bus.dispatch(action)
+            metrics.record_action_dispatched()
+            dispatched_results.append({
+                "action_id": action.action_id,
+                "type": "device_command",
+                "device_id": action.device_id,
+                "command": action.command,
+                "success": result.success,
+                "latency_ms": round(result.latency_ms, 1),
+            })
+            await ws_manager.broadcast(event.household_id, WSEventType.COMMAND_DISPATCHED.value, {
+                "action_id": action.action_id,
+                "device_id": action.device_id,
+                "command": action.command,
+                "success": result.success,
+            })
+
+        elif action.action_type == ActionType.NOTIFICATION:
+            notif = notif_svc.from_action(action)
+            sent = notif_svc.notify(notif)
+            if sent:
+                metrics.record_notification_sent()
+            else:
+                metrics.record_rate_limited()
+            dispatched_results.append({
+                "action_id": action.action_id,
+                "type": "notification",
+                "target_members": action.target_member_ids,
+                "sent": sent,
+            })
+            await ws_manager.broadcast(event.household_id, WSEventType.NOTIFICATION_SENT.value, {
+                "action_id": action.action_id,
+                "sent": sent,
+                "members": action.target_member_ids,
+            })
+
+    total_latency = (time.monotonic() - start) * 1000
+    return {
+        "event_id": event.event_id,
+        "route": route.value,
+        "stage": decision.stage_decided,
+        "complexity_score": decision.complexity_score,
+        "actions_proposed": len(proposed_actions),
+        "actions_approved": len(approved),
+        "dispatched": dispatched_results,
+        "actions_count": len(dispatched_results),
+        "total_latency_ms": round(total_latency, 1),
+    }
 
 
-# Health 
+# ─────────────────────────────────────────────────────────────
+# 10.6  WebSocket endpoint
+# ─────────────────────────────────────────────────────────────
+
+@app.websocket("/ws/{household_id}")
+async def websocket_endpoint(websocket: WebSocket, household_id: str):
+    await ws_manager.connect(household_id, websocket)
+    try:
+        while True:
+            await websocket.receive_text()   # keep alive
+    except WebSocketDisconnect:
+        ws_manager.disconnect(household_id, websocket)
+        logger.info(f"WS: disconnected household={household_id}")
+
+
+# ─────────────────────────────────────────────────────────────
+# 10.7  REST endpoints
+# ─────────────────────────────────────────────────────────────
+
+# ── System ───────────────────────────────────────────────────
+
 @app.get("/health", tags=["System"])
 async def health():
-    """
-    System health check.
-    Returns DynamoDB connectivity status and core configuration.
-    This is the Phase 1 exit check endpoint.
-    """
     dynamo = health_check()
     return {
         "status": "ok",
         "version": "2.0.0",
-        "household_id": settings.household_id,
-        "aws_region": settings.aws_region,
+        "household_id": HH_ID,
         "bedrock_mock_mode": settings.bedrock_mock_mode,
         "dynamo": dynamo["status"],
-        "dynamo_detail": dynamo.get("detail") or dynamo.get("region"),
+        "ws_connections": ws_manager.connection_count(HH_ID),
     }
 
 
 @app.post("/admin/seed", tags=["Admin"])
 async def seed_database():
-    """
-    Create all DynamoDB tables and seed with Sharma family data.
-    Safe to call multiple times — existing tables are skipped.
-    Useful for resetting the demo to a known state.
-    """
     try:
         result = run_full_seed()
         return {"status": "ok", "summary": result}
@@ -100,6 +436,209 @@ async def seed_database():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── Events ───────────────────────────────────────────────────
+
+class RawEventRequest(BaseModel):
+    household_id: str = HH_ID
+    device_type: str | None = None
+    device_id: str | None = None
+    event_type: str = "device_state"
+    payload: dict[str, Any] = {}
+    impact_level: str = "MEDIUM"
+
+
+@app.post("/events/ingest", tags=["Events"])
+async def ingest_event(req: RawEventRequest):
+    """
+    Ingest a raw event through the full SAATHI pipeline.
+    RTE → Rule Engine / Bedrock → Action Planner → Dispatch.
+    """
+    from schemas.enums import DeviceType, EventType, ImpactLevel
+    _DT = {
+        "water_motor": DeviceType.WATER_MOTOR, "geyser": DeviceType.GEYSER,
+        "pressure_cooker": DeviceType.PRESSURE_COOKER, "television": DeviceType.TELEVISION,
+        "smart_fridge": DeviceType.SMART_FRIDGE, "ac": DeviceType.AC, "light": DeviceType.LIGHT,
+    }
+    _ET = {
+        "device_state": EventType.DEVICE_STATE, "life_event": EventType.LIFE_EVENT,
+        "guest_arrival": EventType.GUEST_ARRIVAL, "routine_trigger": EventType.ROUTINE_TRIGGER,
+        "schedule_event": EventType.SCHEDULE_EVENT, "health_emergency": EventType.HEALTH_EMERGENCY,
+        "festival_declaration": EventType.FESTIVAL_DECLARATION,
+    }
+    event = NormalizedEvent(
+        household_id=req.household_id,
+        event_type=_ET.get(req.event_type, EventType.DEVICE_STATE),
+        device_type=_DT.get(req.device_type or "", None),
+        device_id=req.device_id,
+        payload=req.payload,
+        impact_level=ImpactLevel(req.impact_level),
+    )
+
+    await ws_manager.broadcast(req.household_id, WSEventType.EVENT_INGESTED.value, {
+        "event_id": event.event_id,
+        "event_type": event.event_type.value,
+        "device_type": event.device_type.value if event.device_type else None,
+    })
+
+    result = await run_full_pipeline(event)
+    return result
+
+
+_NAMED_EVENTS = {
+    "water_tank_full":          "water_tank_full",
+    "board_exam":               "board_exam",
+    "guest_arrival":            "guest_arrival",
+    "pressure_cooker_5_whistles": "pressure_cooker_5_whistles",
+    "dadaji_medicine":          "dadaji_medicine",
+    "fridge_door_open":         "fridge_door_open",
+}
+
+
+@app.post("/simulate/event/{event_name}", tags=["Simulate"])
+async def simulate_named_event(event_name: str):
+    """Fire a named demo event through the full pipeline."""
+    sim = EventSimulator(HH_ID, run_full_pipeline)
+
+    builders = {
+        "water_tank_full":          sim.water_tank_full,
+        "board_exam":               sim.board_exam,
+        "guest_arrival":            sim.guest_arrival,
+        "pressure_cooker_5_whistles": sim.pressure_cooker_5_whistles,
+        "dadaji_medicine":          sim.dadaji_medicine,
+        "fridge_door_open":         sim.fridge_door_open,
+    }
+
+    if event_name not in builders:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown event '{event_name}'. Valid: {list(builders.keys())}"
+        )
+
+    event = builders[event_name]()
+    result = await run_full_pipeline(event)
+    return result
+
+
+@app.post("/simulate/demo", tags=["Simulate"])
+async def run_full_demo():
+    """Async playback of all 10 demo_script.json events at 10x speed."""
+    sim = EventSimulator(HH_ID, run_full_pipeline, speed_multiplier=10.0)
+    results = await sim.run_demo()
+    return {"status": "complete", "events_processed": len(results), "results": results}
+
+
+# ── Metrics ──────────────────────────────────────────────────
+
+@app.get("/metrics", tags=["Metrics"])
+async def get_metrics():
+    """Return full DashboardMetrics snapshot."""
+    m = metrics.get_dashboard_metrics()
+    return m.model_dump(mode="json")
+
+
+@app.get("/metrics/circuit-breaker", tags=["Metrics"])
+async def get_circuit_breaker():
+    """Return Bedrock circuit breaker state."""
+    return circuit_breaker.get_state_dict()
+
+
+# ── Knowledge Graph ───────────────────────────────────────────
+
+@app.get("/graph/{household_id}", tags=["Graph"])
+async def get_graph(household_id: str):
+    """Return full graph: nodes + edge summary."""
+    try:
+        subgraph = kg.get_subgraph_for_bedrock(household_id, "dev_water_motor_001")
+        return {
+            "household_id": household_id,
+            "graph_version": graph_repo.get_graph_version(household_id),
+            "status": "loaded",
+            "subgraph_nodes": len(subgraph.get("nodes", [])),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/graph/{household_id}/members", tags=["Graph"])
+async def get_members(household_id: str):
+    """Return member nodes affected by board exam life event."""
+    try:
+        members = kg.get_affected_members_with_constraints(household_id, "le_rohan_boards")
+    except Exception:
+        members = []
+    return {"household_id": household_id, "members": members}
+
+
+@app.get("/graph/{household_id}/devices", tags=["Graph"])
+async def get_devices(household_id: str):
+    """Return device impact context for the water motor."""
+    try:
+        ctx = kg.get_device_impact(household_id, "dev_water_motor_001")
+    except Exception:
+        ctx = {}
+    return {"household_id": household_id, "device_context": ctx}
+
+
+# ── Rules ────────────────────────────────────────────────────
+
+@app.get("/rules", tags=["Rules"])
+async def get_rules():
+    """List all active rules in the registry."""
+    rules = rule_engine._registry._raw_rules
+    return {
+        "count": len(rules),
+        "rules": [
+            {
+                "rule_id": r.rule_id,
+                "rule_type": r.rule_type.value if hasattr(r.rule_type, 'value') else str(r.rule_type),
+                "active": r.active,
+                "priority": r.priority if isinstance(r.priority, int) else (r.priority.value if r.priority else None),
+            }
+            for r in rules
+        ],
+    }
+
+
+@app.post("/rules/reload", tags=["Rules"])
+async def reload_rules():
+    """Force-refresh the rule registry from DynamoDB."""
+    # Clear cache timestamp so load() fetches fresh data
+    rule_engine._registry._last_load = 0.0
+    rule_engine._registry.load(HH_ID)
+    return {"status": "ok", "rules_loaded": len(rule_engine._registry._raw_rules)}
+
+
+# ── Patterns ─────────────────────────────────────────────────
+
+@app.get("/patterns", tags=["Patterns"])
+async def get_patterns():
+    """Return all patterns with their confidence bands."""
+    patterns = graph_repo.get_patterns(HH_ID)
+    return {
+        "count": len(patterns),
+        "patterns": [
+            {
+                "pattern_id": p.get("pattern_id"),
+                "confidence": float(p.get("confidence", 0)),
+                "confidence_band": p.get("confidence_band"),
+                "observation_days": p.get("observation_days", 0),
+                "promoted_rule_id": p.get("promoted_rule_id"),
+            }
+            for p in patterns
+        ],
+    }
+
+
+@app.post("/patterns/promote", tags=["Patterns"])
+async def run_promotion():
+    """Scan all patterns and promote eligible ones."""
+    newly_promoted = pattern_engine.promote_if_eligible(HH_ID)
+    return {"status": "ok", "newly_promoted": newly_promoted}
+
+
+# ─────────────────────────────────────────────────────────────
 # Entrypoint
+# ─────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

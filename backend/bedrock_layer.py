@@ -335,7 +335,7 @@ class BedrockLayer:
                         "action_type": "notification",
                         "target_member_ids": ["mbr_mama_004"],
                         "message": "Mehmaan aa rahe hain — ghar taiyar karen",
-                        "channel": "voice",
+                        "channel": "alexa_voice",
                         "source": "BEDROCK",
                     },
                 ],
@@ -361,7 +361,7 @@ class BedrockLayer:
                         "action_type": "notification",
                         "target_member_ids": ["mbr_papa_003", "mbr_mama_004"],
                         "message": "Rohan ki boards shuru hone wali hain — quiet hours 21:00-07:00 activate kar raha hun",
-                        "channel": "mobile",
+                        "channel": "mobile_push",
                         "source": "BEDROCK",
                     },
                     {
@@ -393,7 +393,7 @@ class BedrockLayer:
                     "action_type": "notification",
                     "target_member_ids": [],
                     "message": f"SAATHI has noted the event: {event_type}",
-                    "channel": "mobile",
+                    "channel": "mobile_push",
                     "source": "BEDROCK",
                 }
             ],
