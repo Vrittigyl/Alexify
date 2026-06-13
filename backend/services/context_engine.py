@@ -168,7 +168,7 @@ class ContextEngine:
             table = get_table("rte_audit_log")
             from boto3.dynamodb.conditions import Key
             resp = table.query(
-                IndexName="household_id-timestamp-index",
+                IndexName="household_id-index",
                 KeyConditionExpression=Key("household_id").eq(household_id),
                 ScanIndexForward=False,
                 Limit=10,

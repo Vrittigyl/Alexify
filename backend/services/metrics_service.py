@@ -168,6 +168,7 @@ class MetricsService:
             m = self.get_dashboard_metrics()
             item = {
                 "household_id": m.household_id,
+                "date": m.timestamp.strftime("%Y-%m-%d"),
                 "timestamp": m.timestamp.isoformat(),
                 "total_events_processed": m.total_events_processed,
                 "rule_engine_calls": m.rule_engine_calls,

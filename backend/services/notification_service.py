@@ -225,7 +225,7 @@ class NotificationService:
             item = {
                 "action_id":     notification.notification_id,
                 "household_id":  notification.household_id,
-                "timestamp":     datetime.now(tz=timezone.utc).isoformat(),
+                "created_at":    datetime.now(tz=timezone.utc).isoformat(),
                 "action_type":   "notification",
                 "source":        notification.source.value,
                 "target_members": notification.target_member_ids,

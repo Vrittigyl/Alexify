@@ -70,27 +70,27 @@ from services.logging_config import (
 )
 configure_logging()
 
-from backend.services.action_planner import ActionPlanner
-from backend.services.bedrock_layer import BedrockLayer, BedrockCircuitBreaker, ContextBuilder
-from backend.config import settings
-from backend.services.context_engine import ContextEngine
-from backend.db.dynamo_client import health_check
-from backend.db.seed_dynamo import run_full_seed
-from backend.services.device_command_bus import DeviceCommandBus
-from backend.services.event_batcher import EventBatcher
-from backend.event_simulator import EventSimulator
-from backend.graph_repository import GraphRepository
-from backend.knowledge_graph import KnowledgeGraph
-from backend.services.metrics_service import MetricsService
-from backend.services.notification_service import NotificationService
-from backend.services.pattern_engine import PatternEngine
-from backend.services.presence_service import PresenceService
-from backend.engines.rule_engine import RuleEngine
-from backend.engines.rte import RTE
-from backend.schemas import NormalizedEvent
-from backend.schemas.actions import Action, Notification
-from backend.schemas.enums import ActionType, ImpactLevel, RouteDecision
-from backend.schemas.websocket import WSEventType, WSMessage
+from services.action_planner import ActionPlanner
+from services.bedrock_layer import BedrockLayer, BedrockCircuitBreaker, ContextBuilder
+from config import settings
+from services.context_engine import ContextEngine
+from db.dynamo_client import health_check
+from db.seed_dynamo import run_full_seed
+from services.device_command_bus import DeviceCommandBus
+from services.event_batcher import EventBatcher
+from event_simulator import EventSimulator
+from graph_repository import GraphRepository
+from knowledge_graph import KnowledgeGraph
+from services.metrics_service import MetricsService
+from services.notification_service import NotificationService
+from services.pattern_engine import PatternEngine
+from services.presence_service import PresenceService
+from engines.rule_engine import RuleEngine
+from engines.rte import RTE
+from schemas import NormalizedEvent
+from schemas.actions import Action, Notification
+from schemas.enums import ActionType, ImpactLevel, RouteDecision
+from schemas.websocket import WSEventType, WSMessage
 logger = logging.getLogger("saathi")
 
 HH_ID = settings.household_id
