@@ -9,6 +9,7 @@ interface ButtonProps {
   onClick?: () => void;
   className?: string;
   icon?: React.ReactNode;
+  disabled?: boolean;
 }
 
 export function Button({
@@ -17,6 +18,7 @@ export function Button({
   onClick,
   className = "",
   icon,
+  disabled = false,
 }: ButtonProps) {
   const baseStyles =
     "inline-flex items-center gap-2.5 font-semibold text-[15px] rounded-full transition-all duration-200 cursor-pointer select-none";
@@ -31,10 +33,11 @@ export function Button({
   return (
     <motion.button
       onClick={onClick}
-      whileHover={{ scale: 1.03 }}
-      whileTap={{ scale: 0.98 }}
+      disabled={disabled}
+      whileHover={disabled ? {} : { scale: 1.03 }}
+      whileTap={disabled ? {} : { scale: 0.98 }}
       transition={{ type: "spring", stiffness: 400, damping: 25 }}
-      className={`${baseStyles} ${variants[variant]} ${className}`}
+      className={`${baseStyles} ${variants[variant]} ${className} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
     >
       {icon && <span className="flex-shrink-0">{icon}</span>}
       {children}

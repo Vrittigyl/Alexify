@@ -49,8 +49,8 @@ export default function DevicesPage() {
       {/* Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {filteredDevices.map(device => {
-          const isOn = device.status === "active" || device.status === "running";
-          const hasIssue = device.status === "issue" || device.healthScore && device.healthScore < 80;
+          const isOn = device.status === "on";
+          const hasIssue = device.status === "alert" || device.alertLevel === "critical" || device.alertLevel === "warning";
           
           return (
             <motion.div
@@ -84,13 +84,16 @@ export default function DevicesPage() {
                 <div className="flex flex-col gap-0.5">
                   <span className="text-[10px] text-[#9ca3af] uppercase font-mono tracking-wider">Status</span>
                   <span className={`text-[12px] font-semibold ${hasIssue ? "text-amber-600" : isOn ? "text-emerald-600" : "text-[#374151]"}`}>
-                    {hasIssue ? "Needs attention" : isOn ? "Running" : "Standby"}
+                    {hasIssue ? "Needs attention" : isOn ? "On" : device.status === "standby" ? "Standby" : "Off"}
                   </span>
+                  {device.detail && (
+                    <span className="text-[11px] text-[#6b7280]">{device.detail}</span>
+                  )}
                 </div>
-                {device.healthScore && (
+                {device.saathiNote && (
                   <div className="flex flex-col items-end gap-0.5">
-                    <span className="text-[10px] text-[#9ca3af] uppercase font-mono tracking-wider">Health</span>
-                    <span className="text-[12px] font-bold text-[#111827]">{device.healthScore}%</span>
+                    <span className="text-[10px] text-[#9ca3af] uppercase font-mono tracking-wider">Note</span>
+                    <span className="text-[11px] text-right text-[#6b7280] max-w-[110px] leading-tight">{device.saathiNote.slice(0, 30)}{device.saathiNote.length > 30 ? "…" : ""}</span>
                   </div>
                 )}
               </div>

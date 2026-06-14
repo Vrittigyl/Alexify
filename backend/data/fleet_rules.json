@@ -200,8 +200,9 @@
     "conditions": [],
     "action": {
       "type": "notification",
-      "message_template": "Fridge ka darwaza 3 minute se khula hai. Band kar dijiye.",
-      "channel": "alexa_voice"
+      "message_template": "Fridge ka darwaza 3 minute se khula hai. Cooling loss and electricity waste detected. Please close it immediately.",
+      "channel": "whatsapp",
+      "target_member_ids": ["mbr_mama_001"]
     },
     "safety_critical": false,
     "override_allowed": true

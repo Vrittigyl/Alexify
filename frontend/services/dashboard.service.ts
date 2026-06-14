@@ -287,6 +287,14 @@ export interface BackendGraphNode {
   device_type?: string;
   critical?: boolean;
   schedule?: string;
+  // Live device state (from household_graph, updated by device_command_bus)
+  state?: string;
+  mode?: string;
+  temperature_set_c?: number;
+  temperature_c?: number;
+  volume_percent?: number;
+  door_open_seconds?: number;
+  brightness_pct?: number;
 }
 
 export interface BackendGraphEdge {
@@ -773,6 +781,83 @@ function metricsAndDataToSnapshot(
  * The backend returns context for the water motor only.
  * We enrich the mock device list with the real primary_user from the graph.
  */
+function normalizeDeviceType(deviceType?: string): MockDevice["type"] {
+  const map: Record<string, MockDevice["type"]> = {
+    ac: "ac",
+    television: "tv",
+    tv: "tv",
+    smart_fridge: "fridge",
+    fridge: "fridge",
+    water_motor: "water_motor",
+    geyser: "geyser",
+    pressure_cooker: "pressure_cooker",
+  };
+  return (map[deviceType ?? ""] ?? "ac") as MockDevice["type"];
+}
+
+function deviceEmoji(deviceType?: string): string {
+  const map: Record<string, string> = {
+    ac: "❄️",
+    television: "📺",
+    tv: "📺",
+    smart_fridge: "🧊",
+    fridge: "🧊",
+    light: "💡",
+    lights: "💡",
+    water_motor: "💧",
+    geyser: "🔥",
+    pressure_cooker: "♨️",
+  };
+  return map[deviceType ?? ""] ?? "🔌";
+}
+
+function formatRoomLabel(room?: string): string {
+  if (!room) return "Room";
+  return room.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function graphNodeToMockDevice(
+  n: BackendGraphNode,
+  fullGraph: BackendFullGraphResponse,
+): MockDevice {
+  const primaryUserEdge = fullGraph.edges.find(
+    (e) => e.to === n.id && e.type === "PRIMARY_USER_OF",
+  );
+  let primaryUserName = "Member";
+  if (primaryUserEdge) {
+    const userNode = fullGraph.nodes.find((mn) => mn.id === primaryUserEdge.from);
+    if (userNode) primaryUserName = userNode.name ?? userNode.id;
+  }
+
+  const doorOpen = n.door_open_seconds ?? 0;
+  let status: MockDevice["status"] = "off";
+  if (n.state === "on" || n.mode) status = "on";
+  else if (n.state === "door_open" || doorOpen >= 180) status = "alert";
+  else if (n.state === "standby") status = "standby";
+  else if (n.state === "off") status = "off";
+
+  const detailParts: string[] = [];
+  if (n.temperature_set_c != null) detailParts.push(`Set: ${n.temperature_set_c}°C`);
+  else if (n.temperature_c != null) detailParts.push(`Temp: ${n.temperature_c}°C`);
+  if (n.volume_percent != null) detailParts.push(`Volume: ${n.volume_percent}%`);
+  if (n.mode) detailParts.push(n.mode.replace(/_/g, " "));
+  if (doorOpen > 0) detailParts.push(`Door open ${Math.floor(doorOpen / 60)}m ${doorOpen % 60}s`);
+
+  return {
+    id: n.id,
+    name: n.name ?? n.id,
+    type: normalizeDeviceType(n.device_type),
+    room: formatRoomLabel(n.room),
+    emoji: deviceEmoji(n.device_type),
+    status,
+    primaryUser: primaryUserEdge?.from ?? "",
+    primaryUserName,
+    lastActivity: n.state || n.mode ? "Updated by SAATHI" : "Recently added",
+    detail: detailParts.length > 0 ? detailParts.join(" · ") : undefined,
+    alertLevel: status === "alert" ? "warning" : undefined,
+  };
+}
+
 function devicesToMockDevices(backendDevices: BackendDevicesResponse): MockDevice[] {
   const ctx = backendDevices.device_context;
   if (!ctx || !ctx.found) return SHARMA_DEVICES;
@@ -1190,7 +1275,8 @@ function rteAuditToReasoning(
       : "--:--";
 
     const deviceLabel = d.device_type?.replace(/_/g, " ") ?? "";
-    const eventLabel = d.event_type?.replace(/_/g, " ") ?? "event";
+    let eventLabel = d.event_type?.replace(/_/g, " ") ?? "event";
+    if (d.event_type === "life_event") eventLabel = "board exam";
     const raw = deviceLabel ? `${deviceLabel} — ${eventLabel}` : eventLabel;
     const observation = raw.charAt(0).toUpperCase() + raw.slice(1);
 
@@ -1325,6 +1411,47 @@ function fullGraphToHouseholdGraph(
   };
 }
 
+function onboardingStateToMockHousehold(
+  householdId: string,
+  state: any
+): typeof SHARMA_HOUSEHOLD {
+  const members: MockMember[] = (state.members || []).map((m: any, i: number) => ({
+    id: m.id || `mbr_${i}`,
+    name: m.name,
+    age: m.age || 30,
+    role: (m.role as any) || "adult",
+    emoji: "👤",
+    ageGroup: (m.ageGroup as any) || "adult",
+    room: "Unknown",
+    notificationChannel: "mobile_push",
+    language: "english",
+  }));
+
+  return {
+    ...SHARMA_HOUSEHOLD,
+    id: householdId,
+    familyName: state.householdName || "My Family",
+    city: state.householdCity || "Unknown",
+    memberCount: members.length,
+    members,
+    healthConditions: [],
+    medications: [],
+  };
+}
+
+function onboardingStateToGraph(state: any): HouseholdGraph {
+  return {
+    members: (state.members || []).map((m: any, i: number) => ({
+      id: m.id || `mbr_${i}`,
+      name: m.name,
+      age: m.age || 30,
+      ageGroup: (m.ageGroup as any) || "adult",
+      role: m.role || "member",
+      connections: [],
+    })),
+  };
+}
+
 let _cached: DashboardData | null = null;
 
 export const dashboardService = {
@@ -1339,7 +1466,7 @@ export const dashboardService = {
     return d;
   },
 
-  async load(householdId: string = "hh_xk92p_sharma", forceRefresh = false): Promise<DashboardData> {
+  async load(householdId: string = "hh_xk92p_sharma", forceRefresh = false, onboardingState?: { householdName?: string; householdCity?: string; members?: Array<{ id: string; name: string; role: string; ageGroup: string }>; devices?: Array<{ id: string; name: string; type: string; room: string }> } | null): Promise<DashboardData> {
     if (_cached && !forceRefresh && _cached.household.id === householdId) return _cached;
 
     // ── 1. Fetch everything in parallel — each call is independent ──────────
@@ -1386,29 +1513,18 @@ export const dashboardService = {
     let deviceList: MockDevice[] = [];
     if (householdId === "hh_xk92p_sharma") {
       deviceList = devices ? devicesToMockDevices(devices) : SHARMA_DEVICES;
+      if (fullGraph) {
+        deviceList = deviceList.map((d) => {
+          const node = fullGraph.nodes.find((n) => n.id === d.id && n.node_type === "device");
+          if (!node) return d;
+          const live = graphNodeToMockDevice(node, fullGraph);
+          return { ...d, status: live.status, detail: live.detail ?? d.detail, lastActivity: live.lastActivity, alertLevel: live.alertLevel ?? d.alertLevel };
+        });
+      }
     } else if (fullGraph) {
       deviceList = fullGraph.nodes
         .filter((n) => n.node_type === "device")
-        .map((n, i) => {
-          // find primary user from edges
-          const primaryUserEdge = fullGraph.edges.find((e) => e.to === n.id && e.type === "PRIMARY_USER_OF");
-          let primaryUserName = "Member";
-          if (primaryUserEdge) {
-            const userNode = fullGraph.nodes.find((mn) => mn.id === primaryUserEdge.from);
-            if (userNode) primaryUserName = userNode.name ?? userNode.id;
-          }
-          return {
-            id: n.id,
-            name: n.name ?? n.id,
-            type: (n.device_type ?? "other") as any,
-            room: (n.room as string) ?? "Room",
-            emoji: "🔌",
-            status: "standby",
-            primaryUser: primaryUserEdge?.from ?? "",
-            primaryUserName,
-            lastActivity: "Recently added",
-          };
-        });
+        .map((n) => graphNodeToMockDevice(n, fullGraph));
     }
 
     // HouseholdMemory — DERIVED from /patterns + /metrics
@@ -1449,16 +1565,23 @@ export const dashboardService = {
 
     // HouseholdHealth — DERIVED from /patterns (Phase 8: no more hardcoded scores)
     // Build a minimal household-like object from fullGraph so health doesn't use Sharma data
-    const householdForHealth = fullGraph
-      ? graphToMockHousehold(fullGraph, householdId)
+    // If fullGraph has no member nodes but we have onboarding data, build from that
+    const hasGraphMembers = fullGraph && fullGraph.nodes.filter((n: { node_type: string }) => n.node_type === "member").length > 0;
+    const householdForHealth = hasGraphMembers
+      ? graphToMockHousehold(fullGraph!, householdId)
+      : onboardingState?.members?.length
+      ? onboardingStateToMockHousehold(householdId, onboardingState)
       : SHARMA_HOUSEHOLD;
+
     const health: HealthSummary = patterns
       ? patternsToHealth(patterns.patterns, householdForHealth)
       : mockHealth(householdForHealth);
 
-    // HouseholdGraph — REAL from /graph/{hh}/full (Phase 8)
-    const graph: HouseholdGraph = fullGraph
-      ? fullGraphToHouseholdGraph(fullGraph, householdForHealth)
+    // HouseholdGraph — REAL from /graph/{hh}/full, or built from onboarding
+    const graph: HouseholdGraph = hasGraphMembers
+      ? fullGraphToHouseholdGraph(fullGraph!, householdForHealth)
+      : onboardingState?.members?.length
+      ? onboardingStateToGraph(onboardingState)
       : mockGraph(SHARMA_HOUSEHOLD);
 
     // IntelligenceStats — REAL from /metrics
@@ -1466,14 +1589,22 @@ export const dashboardService = {
       ? metricsToStats(metrics)
       : INTELLIGENCE_STATS;
 
+    // Derive family name / city — prefer backend, then onboarding, then Sharma
+    const familyName = fullGraph?.family_name
+      || onboardingState?.householdName
+      || SHARMA_HOUSEHOLD.familyName;
+    const city = fullGraph?.location
+      || onboardingState?.householdCity
+      || SHARMA_HOUSEHOLD.city;
+
     const d: DashboardData = {
       source: backendReachable ? "backend" : "mock",
       household: {
         ...SHARMA_HOUSEHOLD,
         id: householdId,
-        familyName: fullGraph?.family_name || SHARMA_HOUSEHOLD.familyName,
-        city: fullGraph?.location || SHARMA_HOUSEHOLD.city,
-        memberCount: fullGraph ? graph.members.length : SHARMA_HOUSEHOLD.memberCount,
+        familyName,
+        city,
+        memberCount: graph.members.length || onboardingState?.members?.length || SHARMA_HOUSEHOLD.memberCount,
       },
       graph,
       fullGraph,

@@ -26,6 +26,32 @@ from schemas.intelligence import HouseholdContext
 logger = logging.getLogger(__name__)
 
 
+def _find_device_id(
+    household_id: str,
+    device_type: str,
+    room: str | None = None,
+    fallback: str = "",
+) -> str:
+    """Resolve a device node_id from the household graph by type and optional room."""
+    try:
+        from graph_repository import GraphRepository
+        g = GraphRepository().load_graph(household_id)
+        matches: list[str] = []
+        for node_id, attrs in g.nodes(data=True):
+            if attrs.get("node_type") != "device":
+                continue
+            if attrs.get("device_type") != device_type:
+                continue
+            if room and attrs.get("room") != room:
+                continue
+            matches.append(node_id)
+        if matches:
+            return matches[0]
+    except Exception as exc:
+        logger.debug(f"BedrockLayer: device lookup failed ({device_type}, {room}): {exc}")
+    return fallback
+
+
 # ─────────────────────────────────────────────────────────────
 # 9.4  ContextBuilder
 # ─────────────────────────────────────────────────────────────
@@ -402,32 +428,44 @@ class BedrockLayer:
         """Returns (actions, reasoning, suggested_patterns) for mock mode."""
 
         if event_type == "guest_arrival":
+            light_id = _find_device_id(household_id, "light", "Living Room", "dev_light_001")
+            ac_id = _find_device_id(
+                household_id, "ac", "Living Room",
+                _find_device_id(household_id, "ac", None, "dev_ac_001"),
+            )
             return (
                 [
                     {
                         "action_type": "device_command",
-                        "device_id": "dev_light_001",
+                        "device_id": light_id,
                         "command": "set_warm_white",
                         "source": "BEDROCK",
                         "message": "Setting warm lighting for guests",
                     },
                     {
+                        "action_type": "device_command",
+                        "device_id": ac_id,
+                        "command": "set_temp_22",
+                        "source": "BEDROCK",
+                        "message": "Pre-cooling living room to 22C",
+                    },
+                    {
                         "action_type": "notification",
                         "target_member_ids": ["mbr_papa_003"],
-                        "message": "Mehmaan aa rahe hain - ghar taiyar karen",
+                        "message": "Mehmaan aa rahe hain - living room AC 22C par set kar diya hai. Fridge me cold drinks check kar lijiye.",
                         "channel": "whatsapp",
                         "source": "BEDROCK",
                     },
                 ],
                 (
                     "Guest arrival detected during dinner time. "
-                    "Setting warm lighting and notifying Mama to prepare. "
+                    "Pre-cooling the living room, setting warm lighting, and notifying Mama to prepare cold drinks. "
                     "Dadaji should not be disturbed given his medication schedule at 20:30."
                 ),
                 [
                     {
                         "pattern_id": "ptn_guest_evening_lights",
-                        "description": "Warm lights when evening guests arrive",
+                        "description": "Warm lights and AC when evening guests arrive",
                         "confidence": 0.0,
                         "event_type": "guest_arrival",
                     }
@@ -435,19 +473,30 @@ class BedrockLayer:
             )
 
         if event_type == "life_event":
+            tv_id = _find_device_id(household_id, "television", "Living Room", "dev_tv_001")
+            ac_id = _find_device_id(
+                household_id, "ac", "Study",
+                _find_device_id(household_id, "ac", "Bedroom 1", "dev_ac_002"),
+            )
             return (
                 [
                     {
                         "action_type": "notification",
                         "target_member_ids": ["mbr_papa_003", "mbr_mama_004"],
-                        "message": "Rohan ki boards shuru hone wali hain — quiet hours 21:00-07:00 activate kar raha hun",
-                        "channel": "mobile_push",
+                        "message": "Rohan ki boards 6 din mein shuru hone wali hain. AC ko 24C par set kar diya hai aur TV volume limit kar diya hai.",
+                        "channel": "whatsapp",
                         "source": "BEDROCK",
                     },
                     {
                         "action_type": "device_command",
-                        "device_id": "dev_tv_001",
+                        "device_id": tv_id,
                         "command": "set_volume_max_20",
+                        "source": "BEDROCK",
+                    },
+                    {
+                        "action_type": "device_command",
+                        "device_id": ac_id,
+                        "command": "set_temp_24",
                         "source": "BEDROCK",
                     },
                 ],

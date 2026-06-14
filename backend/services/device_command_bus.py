@@ -28,6 +28,49 @@ logger = logging.getLogger(__name__)
 # Idempotency window: same device + command within 60s → block
 _IDEM_WINDOW_SECS = 60
 
+# Fields written to household_graph when state changes
+_STATE_FIELDS = frozenset({
+    "state", "mode", "temperature_set_c", "temperature_c",
+    "volume_percent", "door_open_seconds", "brightness_pct",
+})
+
+
+async def persist_device_state(
+    household_id: str,
+    device_id: str,
+    state: dict,
+) -> None:
+    """Merge device state fields onto the graph node in DynamoDB."""
+    updates = {k: v for k, v in state.items() if k in _STATE_FIELDS and v is not None}
+    if not updates:
+        return
+    try:
+        from db.dynamo_client import async_execute
+        from graph_repository import GraphRepository
+
+        table = get_table("household_graph")
+        update_expr = "SET "
+        expr_vals: dict = {}
+        expr_names: dict = {}
+        for k, v in updates.items():
+            update_expr += f"#{k} = :{k}, "
+            expr_vals[f":{k}"] = Decimal(str(v)) if isinstance(v, float) else v
+            expr_names[f"#{k}"] = k
+        update_expr = update_expr.rstrip(", ")
+        await async_execute(
+            table.update_item,
+            Key={
+                "PK": f"HOUSEHOLD#{household_id}",
+                "SK": f"NODE#{device_id}",
+            },
+            UpdateExpression=update_expr,
+            ExpressionAttributeValues=expr_vals,
+            ExpressionAttributeNames=expr_names,
+        )
+        GraphRepository().invalidate_cache(household_id)
+    except Exception as e:
+        logger.error(f"Failed to persist device state for {device_id}: {e}")
+
 
 class DeviceCommandBus:
     """
@@ -84,7 +127,7 @@ class DeviceCommandBus:
             self._idem_cache[idem_key_local] = time.monotonic()
 
         # Step 2: Capture pre-state (mock)
-        pre_state = await self._get_device_state(device_id)
+        pre_state = await self._get_device_state(device_id, action.household_id)
 
         # Step 3: Dispatch (simulated)
         try:
@@ -105,6 +148,13 @@ class DeviceCommandBus:
         self._idem_cache[idem_key_local] = time.monotonic()
 
         latency_ms = (time.monotonic() - start) * 1000
+
+        # Step 4.5 Update device state in DynamoDB graph so the frontend devices page updates
+        if success and post_state and device_id != "unknown":
+            try:
+                await persist_device_state(action.household_id, device_id, post_state)
+            except Exception as e:
+                logger.error(f"Failed to update device state in graph: {e}")
 
         result = CommandResult(
             action_id=action.action_id,
@@ -140,29 +190,36 @@ class DeviceCommandBus:
         _CMD_STATES = {
             "turn_off":          {"state": "off"},
             "turn_on":           {"state": "on"},
-            "set_volume_max_20": {"volume_percent": 20},
+            "set_volume_max_20": {"volume_percent": 20, "state": "on"},
+            "set_volume_20":     {"volume_percent": 20, "state": "on"},
             "set_warm_white":    {"mode": "warm_white", "state": "on"},
-            "set_volume_max_40": {"volume_percent": 40},
-            "set_volume_max_50": {"volume_percent": 50},
+            "set_volume_max_40": {"volume_percent": 40, "state": "on"},
+            "set_volume_max_50": {"volume_percent": 50, "state": "on"},
+            "set_temp_22":       {"state": "on", "temperature_set_c": 22, "mode": "cool"},
+            "set_temp_24":       {"state": "on", "temperature_set_c": 24, "mode": "cool"},
         }
         post_state = _CMD_STATES.get(command, {"command_applied": command})
         return True, post_state, None
 
-    async def _get_device_state(self, device_id: str) -> dict:
+    async def _get_device_state(self, device_id: str, household_id: str) -> dict:
         """Return last known device state from DynamoDB (best-effort)."""
         try:
             from db.dynamo_client import async_execute
             table = get_table("household_graph")
-            from boto3.dynamodb.conditions import Key, Attr
             resp = await async_execute(
-                table.query,
-                KeyConditionExpression=Key("household_id").eq(settings.household_id),
-                FilterExpression=Attr("node_id").eq(device_id),
-                Limit=1,
+                table.get_item,
+                Key={
+                    "PK": f"HOUSEHOLD#{household_id}",
+                    "SK": f"NODE#{device_id}",
+                },
             )
-            items = resp.get("Items", [])
-            if items:
-                return {k: items[0].get(k) for k in ("state", "device_type", "room_id") if items[0].get(k)}
+            item = resp.get("Item")
+            if item:
+                return {
+                    k: item[k]
+                    for k in ("state", "device_type", "room", "mode", "temperature_set_c", "volume_percent")
+                    if item.get(k) is not None
+                }
         except Exception:
             pass
         return {}

@@ -89,7 +89,7 @@ from engines.rule_engine import RuleEngine
 from engines.rte import RTE
 from schemas import NormalizedEvent
 from schemas.actions import Action, Notification
-from schemas.enums import ActionType, ImpactLevel, RouteDecision
+from schemas.enums import ActionType, EventType, ImpactLevel, RouteDecision
 from schemas.websocket import WSEventType, WSMessage
 from schemas.onboarding import OnboardingPayload, PreviewResponse, CompleteResponse
 from services.onboarding_service import OnboardingService
@@ -569,6 +569,11 @@ async def run_full_pipeline(event: NormalizedEvent) -> dict[str, Any]:
                 "members": action.target_member_ids,
             })
 
+    # Persist sensor/device-state readings so the Devices tab reflects ingested state
+    if event.device_id and event.event_type == EventType.DEVICE_STATE and event.payload:
+        from services.device_command_bus import persist_device_state
+        await persist_device_state(event.household_id, event.device_id, event.payload)
+
     total_latency = (time.monotonic() - start) * 1000
     return {
         "event_id": event.event_id,
@@ -998,9 +1003,10 @@ _NAMED_EVENTS = {
 
 
 @app.post("/simulate/event/{event_name}", tags=["Simulate"])
-async def simulate_named_event(event_name: str):
+async def simulate_named_event(event_name: str, household_id: str | None = None):
     """Fire a named demo event through the full pipeline."""
-    sim = EventSimulator(HH_ID, run_full_pipeline)
+    hid = household_id or HH_ID
+    sim = EventSimulator(hid, run_full_pipeline)
 
     builders = {
         "water_tank_full":          sim.water_tank_full,
@@ -1259,9 +1265,13 @@ async def get_full_graph(household_id: str):
     try:
         g = graph_repo.load_graph(household_id)
         nodes = []
+        _device_state_keys = (
+            "state", "mode", "temperature_set_c", "temperature_c",
+            "volume_percent", "door_open_seconds", "brightness_pct",
+        )
         for node_id, attrs in g.nodes(data=True):
             if attrs.get("node_type"):   # only real typed nodes
-                nodes.append({
+                node_entry = {
                     "id": node_id,
                     "node_type": attrs.get("node_type"),
                     "name": attrs.get("name", node_id),
@@ -1276,7 +1286,12 @@ async def get_full_graph(household_id: str):
                     "device_type": attrs.get("device_type"),
                     "critical": attrs.get("critical"),
                     "schedule": attrs.get("schedule"),
-                })
+                }
+                if attrs.get("node_type") == "device":
+                    for key in _device_state_keys:
+                        if key in attrs and attrs[key] is not None:
+                            node_entry[key] = attrs[key]
+                nodes.append(node_entry)
         edges = []
         for from_node, to_node, edata in g.edges(data=True):
             edges.append({

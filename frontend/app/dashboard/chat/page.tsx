@@ -4,7 +4,8 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { useDashboard } from "@/components/dashboard/DashboardProvider";
 import { ReasoningFeed } from "@/components/dashboard/ReasoningFeed";
-import { Send, Sparkles, User, Cpu } from "lucide-react";
+import { Send, Sparkles, User, Cpu, Database } from "lucide-react";
+import { SimulatorPanel } from "@/components/dashboard/SimulatorPanel";
 
 const SUGGESTIONS = [
   { label: "Grandpa's BP is high", event: "Dadaji's BP is reading 150/90. Should we adjust anything?" },
@@ -19,11 +20,12 @@ export default function ChatPage() {
   ]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [simulatorOpen, setSimulatorOpen] = useState(false);
 
   if (!data) return null;
 
   async function handleSend(text: string) {
-    if (!text.trim()) return;
+    if (!text.trim() || !data) return;
     
     const userMsg = { role: "user" as const, content: text, id: Date.now() };
     setMessages((prev) => [...prev, userMsg]);
@@ -132,11 +134,21 @@ export default function ChatPage() {
 
       {/* Right Sidebar - Reasoning Panel */}
       <div className="w-full lg:w-[360px] flex flex-col gap-4 overflow-y-auto pr-1">
-        <h3 className="font-bold text-[#111827] flex items-center gap-2">
-          <Cpu size={18} className="text-[#8b5cf6]" /> Reasoning Panel
-        </h3>
+        <div className="flex items-center justify-between">
+          <h3 className="font-bold text-[#111827] flex items-center gap-2">
+            <Cpu size={18} className="text-[#8b5cf6]" /> Reasoning Panel
+          </h3>
+          <button 
+            onClick={() => setSimulatorOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#f3f4f6] hover:bg-[#e5e7eb] rounded-lg text-[12px] font-semibold text-[#374151] transition-colors"
+          >
+            <Database size={14} className="text-[#8b5cf6]" /> Simulator
+          </button>
+        </div>
         <ReasoningFeed entries={data.reasoning} />
       </div>
+
+      <SimulatorPanel isOpen={simulatorOpen} onClose={() => setSimulatorOpen(false)} data={data} />
     </div>
   );
 }

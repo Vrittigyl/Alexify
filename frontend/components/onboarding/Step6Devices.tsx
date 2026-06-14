@@ -8,13 +8,13 @@ import { useState } from "react";
 
 const DEVICE_TYPES: { type: Device["type"]; label: string; emoji: string }[] = [
   { type: "ac", label: "Air Conditioner", emoji: "❄️" },
-  { type: "tv", label: "Smart TV", emoji: "📺" },
+  { type: "television", label: "Smart TV", emoji: "📺" },
   { type: "water_motor", label: "Water Motor", emoji: "💧" },
   { type: "geyser", label: "Geyser / Water Heater", emoji: "🔥" },
-  { type: "fridge", label: "Refrigerator", emoji: "🧊" },
+  { type: "smart_fridge", label: "Refrigerator", emoji: "🧊" },
   { type: "washing_machine", label: "Washing Machine", emoji: "🫧" },
   { type: "pressure_cooker", label: "Pressure Cooker", emoji: "♨️" },
-  { type: "lights", label: "Smart Lights", emoji: "💡" },
+  { type: "light", label: "Smart Lights", emoji: "💡" },
   { type: "security_camera", label: "Security Camera", emoji: "📷" },
   { type: "doorbell", label: "Smart Doorbell", emoji: "🔔" },
   { type: "other", label: "Other", emoji: "🔌" },

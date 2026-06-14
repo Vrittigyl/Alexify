@@ -48,14 +48,21 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   // Initial load
   useEffect(() => {
     const state = onboardingStore.getState();
-    // Use householdId from onboarding if it exists, otherwise fallback to mock
+    // Use householdId from onboarding if it exists, otherwise fallback to demo
     const currentHhId = state.householdId || HH_ID;
     setHhId(currentHhId);
-    
-    dashboardService.load(currentHhId).then(setData);
-    
     setOnboarding(state);
-    return onboardingStore.subscribe((s) => setOnboarding(s));
+
+    dashboardService.load(currentHhId, false, state).then(setData);
+
+    return onboardingStore.subscribe((s) => {
+      setOnboarding(s);
+      // If the householdId just changed (onboarding just completed), reload
+      if (s.householdId && s.householdId !== currentHhId) {
+        dashboardService.clearCache();
+        dashboardService.load(s.householdId, true, s).then(setData);
+      }
+    });
   }, []);
 
   // Live refresh
@@ -114,7 +121,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   return (
     <DashboardContext.Provider value={{ data, onboardingState: onboarding, wsConnected: connected }}>
       <div className="min-h-screen bg-[#faf7f3] flex flex-col">
-        <DashboardHeader data={data} wsConnected={connected} onboardingState={onboarding} />
+        <DashboardHeader data={data} wsConnected={connected} />
         
         {/* Tab Navigation */}
         <div className="bg-white border-b border-[#e5e7eb] sticky top-[60px] z-20 shadow-sm">

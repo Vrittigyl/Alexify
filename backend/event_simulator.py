@@ -115,11 +115,15 @@ class EventSimulator:
         )
 
     def fridge_door_open(self) -> NormalizedEvent:
+        from services.bedrock_layer import _find_device_id
+        fridge_id = _find_device_id(self._hh, "smart_fridge", "Kitchen", "dev_fridge_001")
+        if not fridge_id:
+            fridge_id = _find_device_id(self._hh, "smart_fridge", None, "dev_fridge_001")
         return NormalizedEvent(
             household_id=self._hh,
             event_type=EventType.DEVICE_STATE,
             device_type=DeviceType.SMART_FRIDGE,
-            device_id="dev_fridge_001",
+            device_id=fridge_id,
             payload={"state": "door_open", "door_open_seconds": 210, "temperature_c": 8.2},
         )
 

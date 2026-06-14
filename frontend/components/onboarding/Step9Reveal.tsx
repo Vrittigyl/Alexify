@@ -14,7 +14,7 @@ function buildInsights(state: ReturnType<typeof useOnboardingStore>) {
   // Device-based
   const hasAC = state.devices.some((d) => d.type === "ac");
   const hasWaterMotor = state.devices.some((d) => d.type === "water_motor");
-  const hasTV = state.devices.some((d) => d.type === "tv");
+  const hasTV = state.devices.some((d) => d.type === "television");
   const hasMedicineRoutine = state.routines.some(
     (r) => (r.id === "medicine_morning" || r.id === "medicine_night") && r.selected
   );
@@ -116,6 +116,15 @@ export function Step9Reveal() {
   useEffect(() => {
     async function callBackend() {
       const currentState = onboardingStore.getState();
+
+      // Always derive a local ID immediately so the dashboard never shows
+      // the hardcoded Sharma data when the backend is down.
+      const slug = (currentState.householdName || "my")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .slice(0, 10);
+      const localId = `hh_${slug}_${Math.random().toString(36).slice(2, 7)}`;
+
       try {
         const payload = {
           household_name: currentState.householdName,
@@ -144,21 +153,24 @@ export function Step9Reveal() {
         const res = await fetch("http://localhost:8000/onboarding/complete", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload)
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(5000), // 5s timeout
         });
 
         if (res.ok) {
           const data = await res.json();
+          // Use the real backend-generated household ID
           onboardingStore.setHouseholdId(data.household_id);
-          console.log("Onboarding complete, graph created:", data);
         } else {
-          console.error("Backend onboarding failed", await res.text());
+          // Backend returned an error — use local ID
+          onboardingStore.setHouseholdId(localId);
         }
-      } catch (err) {
-        console.error("Error communicating with backend", err);
+      } catch {
+        // Backend unreachable — use local ID so dashboard shows onboarding data
+        onboardingStore.setHouseholdId(localId);
       }
     }
-    
+
     callBackend();
 
     let step = 0;
