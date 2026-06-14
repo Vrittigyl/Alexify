@@ -319,12 +319,9 @@ export interface BackendFullGraphResponse {
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-const BACKEND_BASE =
-  typeof process !== "undefined" && process.env.NEXT_PUBLIC_BACKEND_URL
-    ? process.env.NEXT_PUBLIC_BACKEND_URL
-    : "http://localhost:8000";
+import { BACKEND_BASE, PROBE_TIMEOUT_MS } from "@/services/api.config";
 
-const TIMEOUT_MS = 3000;
+const TIMEOUT_MS = PROBE_TIMEOUT_MS;
 
 async function get<T>(url: string): Promise<T> {
   const ctrl = new AbortController();

@@ -40,26 +40,12 @@ export interface DemoData {
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-const BACKEND_BASE =
-  typeof process !== "undefined" && process.env.NEXT_PUBLIC_BACKEND_URL
-    ? process.env.NEXT_PUBLIC_BACKEND_URL
-    : "http://localhost:8000";
+import { BACKEND_BASE, PROBE_TIMEOUT_MS, fetchWithTimeout } from "@/services/api.config";
 
-const FETCH_TIMEOUT_MS = 2000;
+const FETCH_TIMEOUT_MS = PROBE_TIMEOUT_MS;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-async function fetchWithTimeout<T>(url: string): Promise<T> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, { signal: controller.signal });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return (await res.json()) as T;
-  } finally {
-    clearTimeout(timer);
-  }
-}
+// fetchWithTimeout is imported from api.config
 
 // ─── Service ─────────────────────────────────────────────────────────────────
 
