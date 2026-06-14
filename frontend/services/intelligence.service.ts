@@ -26,6 +26,22 @@ import type {
   Observation,
 } from "./dashboard.service";
 
+// ─── Name resolution helper ───────────────────────────────────────────────────
+
+function memberName(memberId: string | undefined): string | undefined {
+  if (!memberId) return undefined;
+  // Try Sharma lookup first (for demo household)
+  const sharmaMatch = SHARMA_MEMBERS.find((m) => m.id === memberId)?.name;
+  if (sharmaMatch) return sharmaMatch;
+  // For other households, extract a readable name from the member ID slug:
+  // e.g. "mbr_imran_khan_001" → "Imran Khan"
+  return memberId
+    .replace(/^mbr_/, "")
+    .replace(/_\d+$/, "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 // ─── Input types (matching Phase 5 discovered shapes) ────────────────────────
 
 export interface RawPattern {
@@ -68,13 +84,6 @@ export interface RawRule {
   rule_type: string;
   active: boolean;
   priority: number | null;
-}
-
-// ─── Name resolution helper ───────────────────────────────────────────────────
-
-function memberName(memberId: string | undefined): string | undefined {
-  if (!memberId) return undefined;
-  return SHARMA_MEMBERS.find((m) => m.id === memberId)?.name;
 }
 
 // ─── Pattern → natural language sentence ─────────────────────────────────────

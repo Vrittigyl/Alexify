@@ -802,8 +802,10 @@ function patternsToLearnedToday(patterns: BackendPattern[]): LearnedItem[] {
   if (learning.length === 0) return [];
 
   return learning.map((p, i) => {
+    // Try Sharma lookup first, then use the raw member_id as-is (it often contains the name)
     const memberName = p.member_id
-      ? SHARMA_MEMBERS.find((m) => m.id === p.member_id)?.name
+      ? (SHARMA_MEMBERS.find((m) => m.id === p.member_id)?.name
+         ?? p.member_id.replace(/^mbr_/, "").replace(/_\d+$/, "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()))
       : undefined;
 
     return {
@@ -836,8 +838,10 @@ function patternsAndRulesToReasoning(
   const entries: ReasoningEntry[] = promoted.slice(0, 5).map((p, i) => {
     const ruleId = p.promoted_rule_id;
     const rule = rules.find((r) => r.rule_id === ruleId);
+    // Resolve member name: try Sharma lookup, then extract from member_id slug
     const memberName = p.member_id
-      ? SHARMA_MEMBERS.find((m) => m.id === p.member_id)?.name ?? p.member_id
+      ? (SHARMA_MEMBERS.find((m) => m.id === p.member_id)?.name
+         ?? p.member_id.replace(/^mbr_/, "").replace(/_\d+$/, "").replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()))
       : "household";
     const confPct = Math.round(p.confidence * 100);
 
@@ -962,6 +966,77 @@ function patternsAndMetricsToLearning(
       "Still building baseline for some members",
     ],
     byMember: byMember,
+  };
+}
+
+/**
+ * Build a minimal MockHousehold-compatible object from a BackendFullGraphResponse.
+ * Used so health scoring, presence, and graph rendering don't fall back to Sharma data
+ * for non-Sharma households.
+ */
+function graphToMockHousehold(
+  g: BackendFullGraphResponse,
+  householdId: string,
+): typeof SHARMA_HOUSEHOLD {
+  const memberNodes = g.nodes.filter((n) => n.node_type === "member");
+
+  const members = memberNodes.map((n) => ({
+    id: n.id,
+    name: n.name ?? n.id,
+    age: n.age ?? 30,
+    role: (n.role ?? "adult") as "grandparent" | "parent" | "child",
+    emoji: n.role === "grandparent" ? "👴" : n.role === "child" ? "👦" : "👤",
+    ageGroup: (
+      n.role === "grandparent" ? "senior"
+      : n.role === "child"       ? "child"
+      : "adult"
+    ) as "senior" | "adult" | "teen" | "child",
+    room: n.room ?? "Home",
+    notificationChannel: "mobile_push" as const,
+    language: "english" as const,
+  }));
+
+  // Health conditions from HAS_CONDITION edges
+  const healthEdges = g.edges.filter((e) => e.type === "HAS_CONDITION");
+  const healthConditions = healthEdges.map((e, i) => {
+    const condNode = g.nodes.find((n) => n.id === e.to);
+    return {
+      id: e.to,
+      memberId: e.from,
+      condition: condNode?.condition ?? e.to,
+      label: condNode?.name ?? condNode?.condition ?? e.to.replace(/_/g, " "),
+      severity: (condNode?.severity ?? "moderate") as "mild" | "moderate" | "high",
+      emoji: "🩺",
+    };
+  });
+
+  // Medications from TAKES edges with schedule
+  const takesEdges = g.edges.filter((e) => e.type === "TAKES");
+  const medications = takesEdges.map((e, i) => {
+    const medNode = g.nodes.find((n) => n.id === e.to);
+    return {
+      id: e.to,
+      memberId: e.from,
+      name: medNode?.name ?? e.to.replace(/_/g, " "),
+      schedule: e.schedule ?? medNode?.schedule ?? "08:00",
+      critical: medNode?.critical ?? false,
+      takenToday: false, // unknown — no tracking endpoint
+    };
+  });
+
+  return {
+    id: householdId,
+    familyName: g.family_name ?? "My Family",
+    location: g.location ?? "",
+    city: g.location ?? "",
+    memberCount: members.length,
+    deviceCount: g.nodes.filter((n) => n.node_type === "device").length,
+    routineCount: g.nodes.filter((n) => n.node_type === "routine").length,
+    patternCount: 0,
+    daysLearning: 0,
+    members,
+    healthConditions,
+    medications,
   };
 }
 
@@ -1259,7 +1334,7 @@ export const dashboardService = {
 
   getMocks(): DashboardData {
     if (_cached) return _cached;
-    const d = buildAllMock();
+    const d = buildBaseData("hh_xk92p_sharma");
     _cached = d;
     return d;
   },
@@ -1373,13 +1448,17 @@ export const dashboardService = {
         : mockReasoning();
 
     // HouseholdHealth — DERIVED from /patterns (Phase 8: no more hardcoded scores)
+    // Build a minimal household-like object from fullGraph so health doesn't use Sharma data
+    const householdForHealth = fullGraph
+      ? graphToMockHousehold(fullGraph, householdId)
+      : SHARMA_HOUSEHOLD;
     const health: HealthSummary = patterns
-      ? patternsToHealth(patterns.patterns, SHARMA_HOUSEHOLD)
-      : mockHealth(SHARMA_HOUSEHOLD);
+      ? patternsToHealth(patterns.patterns, householdForHealth)
+      : mockHealth(householdForHealth);
 
     // HouseholdGraph — REAL from /graph/{hh}/full (Phase 8)
     const graph: HouseholdGraph = fullGraph
-      ? fullGraphToHouseholdGraph(fullGraph, SHARMA_HOUSEHOLD)
+      ? fullGraphToHouseholdGraph(fullGraph, householdForHealth)
       : mockGraph(SHARMA_HOUSEHOLD);
 
     // IntelligenceStats — REAL from /metrics
@@ -1389,11 +1468,17 @@ export const dashboardService = {
 
     const d: DashboardData = {
       source: backendReachable ? "backend" : "mock",
-      household: { 
-        ...SHARMA_HOUSEHOLD, 
+      household: {
+        ...SHARMA_HOUSEHOLD,
         id: householdId,
-        familyName: fullGraph?.family_name || SHARMA_HOUSEHOLD.familyName,
-        city: fullGraph?.location || SHARMA_HOUSEHOLD.city,
+        familyName: fullGraph?.family_name ?? (householdId === "hh_xk92p_sharma" ? SHARMA_HOUSEHOLD.familyName : "My Family"),
+        city: fullGraph?.location ?? (householdId === "hh_xk92p_sharma" ? SHARMA_HOUSEHOLD.city : ""),
+        memberCount: fullGraph?.nodes.filter((n) => n.node_type === "member").length ?? SHARMA_HOUSEHOLD.memberCount,
+        deviceCount: fullGraph?.nodes.filter((n) => n.node_type === "device").length ?? SHARMA_HOUSEHOLD.deviceCount,
+        // Use members from the real graph if available — prevents Sharma names showing up
+        members: householdForHealth.members.length > 0 ? householdForHealth.members : SHARMA_HOUSEHOLD.members,
+        healthConditions: householdForHealth.healthConditions,
+        medications: householdForHealth.medications,
       },
       graph,
       fullGraph,
@@ -1408,13 +1493,12 @@ export const dashboardService = {
       learning,
       health,
       // FamilyPresence — no live presence endpoint exists.
-      // Always use mockPresence but mark it clearly as not live.
-      // The component will show a "no live presence data" banner.
-      presence: { 
-        home: graph.members as unknown as typeof SHARMA_HOUSEHOLD.members,
+      // Build member list from the real graph nodes so we don't show Sharma names.
+      presence: {
+        home: householdForHealth.members as unknown as typeof SHARMA_HOUSEHOLD.members,
         away: [],
         currentActivity: [],
-        isLive: false 
+        isLive: false,
       },
       snapshot,
       devices: deviceList,
@@ -1422,11 +1506,12 @@ export const dashboardService = {
       predictions: householdId === "hh_xk92p_sharma" ? SHARMA_PREDICTIONS : [],
       intelligenceStats,
       notificationStats: householdId === "hh_xk92p_sharma" ? NOTIFICATION_STATS : {
-        totalSent: 0,
-        byChannel: { mobile_push: 0, alexa_voice: 0, smart_display: 0, sms: 0 },
-        byCategory: { health: 0, routine: 0, safety: 0, system: 0 },
-        acknowledgementRate: 100,
-        averageDelayMs: 0
+        ...NOTIFICATION_STATS,
+        sentToday: 0,
+        acknowledged: 0,
+        pending: 0,
+        critical: 0,
+        byChannel: { alexa_voice: 0, mobile_push: 0, whatsapp: 0 },
       },
     };
 
@@ -1454,7 +1539,7 @@ export const dashboardService = {
         get<BackendMetrics>(`${BACKEND_BASE}/metrics`),
         get<BackendPatternsResponse>(`${BACKEND_BASE}/patterns`),
         get<BackendActionsResponse>(`${BACKEND_BASE}/actions/history?limit=10`),
-        get<BackendFullGraphResponse>(`${BACKEND_BASE}/graph/hh_xk92p_sharma/full`),
+        get<BackendFullGraphResponse>(`${BACKEND_BASE}/graph/${_cached?.household.id ?? "hh_xk92p_sharma"}/full`),
       ]);
       const m = mr.status === "fulfilled" ? mr.value : null;
       if (!m) return mockSnapshot();
