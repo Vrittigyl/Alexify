@@ -322,7 +322,7 @@ export function Step9Reveal() {
           <Button
             variant="primary"
             icon={<ArrowRight size={16} strokeWidth={2.5} />}
-            onClick={() => router.push("/dashboard")}
+            onClick={() => router.push("/dashboard/home")}
             className="w-full sm:w-auto justify-center"
           >
             Open my dashboard

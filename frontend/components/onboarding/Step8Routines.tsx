@@ -18,6 +18,17 @@ const ROUTINE_EMOJIS: Record<string, string> = {
   prayer_time: "🙏",
 };
 
+const TIME_OPTIONS = [
+  "Select time",
+  "5:00 AM", "5:30 AM", "6:00 AM", "6:30 AM", "7:00 AM", "7:30 AM", 
+  "8:00 AM", "8:30 AM", "9:00 AM", "9:30 AM", "10:00 AM", "10:30 AM", 
+  "11:00 AM", "11:30 AM", "12:00 PM", "12:30 PM", "1:00 PM", "1:30 PM", 
+  "2:00 PM", "2:30 PM", "3:00 PM", "3:30 PM", "4:00 PM", "4:30 PM", 
+  "5:00 PM", "5:30 PM", "6:00 PM", "6:30 PM", "7:00 PM", "7:30 PM", 
+  "8:00 PM", "8:30 PM", "9:00 PM", "9:30 PM", "10:00 PM", "10:30 PM", 
+  "11:00 PM", "11:30 PM"
+];
+
 const item = {
   hidden: { opacity: 0, y: 20 },
   show: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] as [number,number,number,number] } },
@@ -80,7 +91,19 @@ export function Step8Routines() {
                 <p className={`font-semibold text-[14px] ${routine.selected ? "text-[#c2410c]" : "text-[#374151]"}`}>
                   {routine.label}
                 </p>
-                {routine.time && (
+                {routine.selected && (
+                  <select
+                    className="mt-1 bg-white border border-[#fed7aa] rounded px-2 py-0.5 text-[12px] text-[#c2410c] outline-none"
+                    value={routine.time || "Select time"}
+                    onChange={(e) => onboardingStore.updateRoutineTime(routine.id, e.target.value === "Select time" ? "" : e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {TIME_OPTIONS.map(opt => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
+                  </select>
+                )}
+                {!routine.selected && routine.time && (
                   <p className="text-[12px] text-[#9ca3af] mt-0.5">Usually around {routine.time}</p>
                 )}
               </div>

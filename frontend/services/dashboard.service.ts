@@ -1471,14 +1471,9 @@ export const dashboardService = {
       household: {
         ...SHARMA_HOUSEHOLD,
         id: householdId,
-        familyName: fullGraph?.family_name ?? (householdId === "hh_xk92p_sharma" ? SHARMA_HOUSEHOLD.familyName : "My Family"),
-        city: fullGraph?.location ?? (householdId === "hh_xk92p_sharma" ? SHARMA_HOUSEHOLD.city : ""),
-        memberCount: fullGraph?.nodes.filter((n) => n.node_type === "member").length ?? SHARMA_HOUSEHOLD.memberCount,
-        deviceCount: fullGraph?.nodes.filter((n) => n.node_type === "device").length ?? SHARMA_HOUSEHOLD.deviceCount,
-        // Use members from the real graph if available — prevents Sharma names showing up
-        members: householdForHealth.members.length > 0 ? householdForHealth.members : SHARMA_HOUSEHOLD.members,
-        healthConditions: householdForHealth.healthConditions,
-        medications: householdForHealth.medications,
+        familyName: fullGraph?.family_name || SHARMA_HOUSEHOLD.familyName,
+        city: fullGraph?.location || SHARMA_HOUSEHOLD.city,
+        memberCount: fullGraph ? graph.members.length : SHARMA_HOUSEHOLD.memberCount,
       },
       graph,
       fullGraph,
