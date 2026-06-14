@@ -5,6 +5,7 @@ import { motion } from "framer-motion";
 import { useDashboard } from "@/components/dashboard/DashboardProvider";
 import { Clock, Check, X, Edit2, PlayCircle } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { BACKEND_BASE } from "@/services/api.config";
 
 type FilterTab = "All" | "Morning" | "Evening" | "Night" | "Weekend";
 
@@ -31,7 +32,7 @@ export default function RoutinesPage() {
   const handlePromote = async (patternId: string) => {
     setPromotingId(patternId);
     try {
-      await fetch(`http://localhost:8000/patterns/promote`, {
+      await fetch(`${BACKEND_BASE}/patterns/promote`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pattern_id: patternId, priority: "medium" })

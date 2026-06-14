@@ -26,11 +26,7 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
-
-const BACKEND_BASE =
-  typeof process !== "undefined" && process.env.NEXT_PUBLIC_BACKEND_URL
-    ? process.env.NEXT_PUBLIC_BACKEND_URL
-    : "http://localhost:8000";
+import { BACKEND_BASE } from "@/services/api.config";
 
 // WebSocket URL — converts http(s) → ws(s)
 function toWsUrl(base: string, householdId: string): string {

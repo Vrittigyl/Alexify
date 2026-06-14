@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Sparkles, ArrowRight, Home, Users, Cpu, Clock } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { onboardingStore, useOnboardingStore } from "@/lib/onboarding-store";
+import { BACKEND_BASE } from "@/services/api.config";
 
 // Simulated intelligence insights built from user's data
 function buildInsights(state: ReturnType<typeof useOnboardingStore>) {
@@ -150,7 +151,7 @@ export function Step9Reveal() {
           priorities: currentState.priorities
         };
 
-        const res = await fetch("http://localhost:8000/onboarding/complete", {
+        const res = await fetch(`${BACKEND_BASE}/onboarding/complete`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),

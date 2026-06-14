@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, Play, Database, Send, AlertCircle } from "lucide-react";
 import type { DashboardData } from "@/services/dashboard.service";
 import { Button } from "@/components/ui/Button";
+import { BACKEND_BASE } from "@/services/api.config";
 
 interface SimulatorPanelProps {
   isOpen: boolean;
@@ -40,7 +41,7 @@ export function SimulatorPanel({ isOpen, onClose, data }: SimulatorPanelProps) {
     setLoading(true);
     setResult(null);
     try {
-      const res = await fetch(`http://localhost:8000/simulate/event/${eventName}?household_id=${data.household.id}`, {
+      const res = await fetch(`${BACKEND_BASE}/simulate/event/${eventName}?household_id=${data.household.id}`, {
         method: "POST",
       });
       if (res.ok) {
@@ -67,7 +68,7 @@ export function SimulatorPanel({ isOpen, onClose, data }: SimulatorPanelProps) {
         return;
       }
 
-      const res = await fetch("http://localhost:8000/events/ingest", {
+      const res = await fetch(`${BACKEND_BASE}/events/ingest`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -92,7 +93,7 @@ export function SimulatorPanel({ isOpen, onClose, data }: SimulatorPanelProps) {
     setLoading(true);
     setResult(null);
     try {
-      const res = await fetch("http://localhost:8000/admin/seed", { method: "POST" });
+      const res = await fetch(`${BACKEND_BASE}/admin/seed`, { method: "POST" });
       if (res.ok) {
         setResult({ status: "success", msg: "Database seeded successfully." });
       } else {

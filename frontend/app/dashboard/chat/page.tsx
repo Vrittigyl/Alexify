@@ -6,6 +6,7 @@ import { useDashboard } from "@/components/dashboard/DashboardProvider";
 import { ReasoningFeed } from "@/components/dashboard/ReasoningFeed";
 import { Send, Sparkles, User, Cpu, Database } from "lucide-react";
 import { SimulatorPanel } from "@/components/dashboard/SimulatorPanel";
+import { BACKEND_BASE } from "@/services/api.config";
 
 const SUGGESTIONS = [
   { label: "Grandpa's BP is high", event: "Dadaji's BP is reading 150/90. Should we adjust anything?" },
@@ -34,7 +35,7 @@ export default function ChatPage() {
 
     try {
       // Freeform ingest fallback
-      const res = await fetch("http://localhost:8000/events/ingest", {
+      const res = await fetch(`${BACKEND_BASE}/events/ingest`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
