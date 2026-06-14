@@ -443,11 +443,19 @@ class RuleEngine:
         actions: list[Action] = []
         for rule, result in winners:
             for rule_action in result.actions:
+                # Fall back to the triggering event's device_id when the rule
+                # doesn't explicitly specify a target device.  This ensures the
+                # water_tank_full event (device_id="dev_water_motor_001") is
+                # preserved in the action rather than stored as None / "".
+                effective_device_id = (
+                    rule_action.target_device_id
+                    or (event.device_id if rule_action.type.value == "device_command" else None)
+                )
                 actions.append(Action(
                     household_id=event.household_id,
                     action_type=rule_action.type,
                     source=ActionSource.RULE_ENGINE,
-                    device_id=rule_action.target_device_id,
+                    device_id=effective_device_id,
                     command=rule_action.command,
                     target_member_ids=rule_action.target_member_ids or [],
                     message=rule_action.message_template,

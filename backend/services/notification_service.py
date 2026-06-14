@@ -82,10 +82,12 @@ class NotificationService:
         # Simulate dispatch
         formatted = self._format_message(notification)
         self._simulate_dispatch(notification, formatted)
-        await self._write_notification_log(notification, formatted)
 
+        # Mark sent BEFORE writing to ActionLog so the stored record shows sent=true
         notification.sent = True
         notification.sent_at = datetime.now(tz=timezone.utc)
+        await self._write_notification_log(notification, formatted)
+
         logger.info(
             f"NotificationService: sent to {notification.target_member_ids} "
             f"channel={notification.channel.value if notification.channel else 'any'} "
@@ -236,6 +238,11 @@ class NotificationService:
                 "rate_limited":  notification.rate_limited,
                 "audit_expiry":  ttl,
             }
+            # Include rule_id when the notification was triggered by the rule engine
+            if notification.action_id:
+                item["action_ref"] = notification.action_id
+            if notification.event_id:
+                item["event_id"] = notification.event_id
             from db.dynamo_client import async_execute
             await async_execute(table.put_item, Item=item)
         except Exception as e:

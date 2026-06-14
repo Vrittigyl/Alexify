@@ -176,6 +176,7 @@ export function HouseholdGraph({ graph, fullGraph = null }: HouseholdGraphProps)
   const [width, setWidth] = useState(340);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [tooltip, setTooltip] = useState<{ node: FGNode; x: number; y: number } | null>(null);
+  const [mousePos, setMousePos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
 
   const { nodes, links } = buildGraphData(fullGraph, graph);
 
@@ -323,9 +324,12 @@ export function HouseholdGraph({ graph, fullGraph = null }: HouseholdGraphProps)
     setTooltip(null);
   }, []);
 
+  const mousePosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+
   const handleNodeHover = useCallback((node: FGNode | null) => {
     if (!node) { setTooltip(null); return; }
-    setTooltip({ node, x: 0, y: 0 });
+    // Use live mouse position tracked by the container's onMouseMove
+    setTooltip({ node, x: mousePosRef.current.x, y: mousePosRef.current.y });
   }, []);
 
   const handleBackgroundClick = useCallback(() => {
@@ -337,8 +341,40 @@ export function HouseholdGraph({ graph, fullGraph = null }: HouseholdGraphProps)
 
   return (
     <div className="w-full flex flex-col gap-0">
+      {/* Graph stats header */}
+      <div className="px-4 py-2 border-b border-[#f3f4f6] bg-white flex items-center gap-3">
+        <span className="text-[11px] font-mono text-[#9ca3af]">
+          {nodes.length} nodes
+        </span>
+        <span className="text-[10px] text-[#e5e7eb]">·</span>
+        <span className="text-[11px] font-mono text-[#9ca3af]">
+          {links.length} edges
+        </span>
+        {fullGraph && (
+          <span className="ml-auto text-[10px] font-mono bg-[#f0fdf4] text-[#059669] px-1.5 py-0.5 rounded">
+            Live graph
+          </span>
+        )}
+      </div>
       {/* Graph canvas */}
-      <div ref={containerRef} className="w-full relative" style={{ height: 380, background: "#fafafa", borderRadius: "0 0 0 0" }}>
+      <div
+        ref={containerRef}
+        className="w-full relative"
+        style={{ height: 380, background: "#fafafa", borderRadius: "0 0 0 0" }}
+        onMouseMove={(e) => {
+          const rect = containerRef.current?.getBoundingClientRect();
+          if (rect) {
+            const pos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+            mousePosRef.current = pos;
+            setMousePos(pos);
+          }
+          // Update tooltip position if already open
+          if (tooltip) {
+            const rect2 = containerRef.current?.getBoundingClientRect();
+            if (rect2) setTooltip((prev) => prev ? { ...prev, x: e.clientX - rect2.left, y: e.clientY - rect2.top } : null);
+          }
+        }}
+      >
         {width > 0 && (
           <ForceGraph2D
             graphData={filteredData as { nodes: object[]; links: object[] }}

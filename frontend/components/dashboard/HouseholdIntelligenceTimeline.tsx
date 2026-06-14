@@ -116,18 +116,33 @@ function buildTimeline(
     });
   }
 
-  // Sort by parsed time (HH:MM AM/PM)
+  // Sort by time tier:
+  //   Tier 0 — live events & reasoning (have HH:MM AM/PM or HH:MM) → sort by time descending newest first
+  //   Tier 1 — learned items (relative strings like "Today", "28 days ago") → sort last as background context
   moments.sort((a, b) => {
-    const parseTime = (t: string) => {
-      const m = t.match(/(\d+):(\d+)\s*(AM|PM)/i);
-      if (!m) return -1;
-      let h = parseInt(m[1]);
-      const min = parseInt(m[2]);
-      if (m[3].toUpperCase() === "PM" && h !== 12) h += 12;
-      if (m[3].toUpperCase() === "AM" && h === 12) h = 0;
-      return h * 60 + min;
+    const parseTime = (t: string): { tier: number; minutes: number } => {
+      // HH:MM AM/PM format
+      const ampm = t.match(/(\d+):(\d+)\s*(AM|PM)/i);
+      if (ampm) {
+        let h = parseInt(ampm[1]);
+        const min = parseInt(ampm[2]);
+        if (ampm[3].toUpperCase() === "PM" && h !== 12) h += 12;
+        if (ampm[3].toUpperCase() === "AM" && h === 12) h = 0;
+        return { tier: 0, minutes: h * 60 + min };
+      }
+      // HH:MM 24h format (no AM/PM)
+      const h24 = t.match(/^(\d{1,2}):(\d{2})$/);
+      if (h24) {
+        return { tier: 0, minutes: parseInt(h24[1]) * 60 + parseInt(h24[2]) };
+      }
+      // Relative text ("Today", "28 days ago", etc.) → background tier
+      return { tier: 1, minutes: 0 };
     };
-    return parseTime(a.time) - parseTime(b.time);
+    const pa = parseTime(a.time);
+    const pb = parseTime(b.time);
+    if (pa.tier !== pb.tier) return pa.tier - pb.tier;
+    // Within the same tier: sort newest first (descending)
+    return pb.minutes - pa.minutes;
   });
 
   // Deduplicate by headline (events and reasoning may overlap)

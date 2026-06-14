@@ -168,6 +168,22 @@ function EventRow({ ev }: { ev: MockActivity }) {
                 </div>
               )}
 
+              {/* Notification delivery status */}
+              {(ev.actionType === "notification" || ev.actionType === "reminder") && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-mono text-[#9ca3af] shrink-0">Delivery</span>
+                  {ev.success !== false ? (
+                    <span className="text-[11px] font-mono font-semibold text-[#10b981] bg-[#f0fdf4] px-1.5 py-0.5 rounded">
+                      ✓ Delivered
+                    </span>
+                  ) : (
+                    <span className="text-[11px] font-mono font-semibold text-[#9ca3af] bg-[#f3f4f6] px-1.5 py-0.5 rounded">
+                      ○ Pending
+                    </span>
+                  )}
+                </div>
+              )}
+
               {/* Rule ID */}
               {ev.ruleId && (
                 <div className="flex items-center gap-2">

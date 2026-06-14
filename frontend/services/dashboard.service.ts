@@ -141,6 +141,7 @@ export interface FamilyPresence {
   home: MockMember[];
   away: MockMember[];
   currentActivity: { memberId: string; activity: string }[];
+  isLive?: boolean;  // false = no live presence endpoint; data is illustrative only
 }
 
 export interface HouseholdSnapshot {
@@ -239,8 +240,8 @@ export interface BackendAction {
   channel?: string;
   target_members?: string[];
   rule_id?: string;
-  sent?: boolean;
-  success?: boolean;
+  sent?: boolean;       // notification delivery status (from notification_service)
+  success?: boolean;    // device command execution result (from device_command_bus)
   latency_ms?: number;
 }
 
@@ -1088,7 +1089,12 @@ function actionsToEvents(backendActions: BackendAction[]): MockActivity[] {
       channel: a.channel,
       latencyMs: typeof a.latency_ms === "number" ? Math.round(a.latency_ms) : undefined,
       actionType: a.action_type,
-      success: a.success,
+      // For device_command: use a.success (from CommandResult).
+      // For notifications: use a.sent (from notification_service._write_notification_log).
+      // Fall back to undefined when neither is present.
+      success: a.action_type === "notification" || a.action_type === "reminder"
+        ? (a.sent ?? a.success)
+        : a.success,
     };
   });
 }
@@ -1374,7 +1380,10 @@ export const dashboardService = {
       reasoning,
       learning,
       health,
-      presence: mockPresence(SHARMA_HOUSEHOLD),
+      // FamilyPresence — no live presence endpoint exists.
+      // Always use mockPresence but mark it clearly as not live.
+      // The component will show a "no live presence data" banner.
+      presence: { ...mockPresence(SHARMA_HOUSEHOLD), isLive: false },
       snapshot,
       devices: deviceList,
       routines: SHARMA_ROUTINES,

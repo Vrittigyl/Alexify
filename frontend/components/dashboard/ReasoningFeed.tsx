@@ -86,17 +86,26 @@ function parseReasoningEntry(entry: ReasoningEntry): ReasoningSteps {
   const scoreMatch = text.match(/score\s+(\d+)/i);
   const complexityScore = scoreMatch ? parseInt(scoreMatch[1]) : undefined;
 
-  // Build context bullets from what we know
+  // Build context bullets from REAL structured data only — no fabrication
   const context: string[] = [];
   if (entry.route === "BEDROCK") {
-    context.push("Evening household state considered");
-    context.push("Family members' patterns evaluated");
-    if (complexityScore && complexityScore > 50) context.push("Multi-member coordination required");
+    // Use real score breakdown keys as context factors
+    if (entry.scoreBreakdown && Object.keys(entry.scoreBreakdown).length > 0) {
+      Object.keys(entry.scoreBreakdown).forEach((k) =>
+        context.push(`Factor: ${k.replace(/_/g, " ")} (+${entry.scoreBreakdown![k]})`)
+      );
+    }
+    if (complexityScore) context.push(`Complexity score: ${complexityScore}`);
+    if (context.length === 0) context.push("Multi-factor household context evaluated");
   } else if (entry.route === "RULE_ENGINE") {
-    context.push(stage === 1 ? "Rule registry direct match" : `Stage ${stage ?? 2} promoted pattern match`);
-    if (ruleId) context.push(`Active rule: ${ruleId}`);
+    const stageText = stage === 1 ? "Stage 1 — direct rule registry match" : `Stage ${stage ?? 2} — promoted pattern match`;
+    context.push(stageText);
+    if (entry.ruleMatched) context.push(`Matched rule: ${entry.ruleMatched}`);
+    if (entry.patternMatched) context.push(`Promoted pattern: ${entry.patternMatched}`);
   } else {
-    context.push("Pattern confidence and observation history");
+    // PATTERN route
+    if (entry.patternMatched) context.push(`Pattern: ${entry.patternMatched}`);
+    else context.push("Observation history and pattern confidence evaluated");
   }
 
   // Build action bullets

@@ -183,13 +183,16 @@ class DeviceCommandBus:
                 "timestamp":    now_iso,          # keep for backward compat
                 "action_type":  action.action_type.value,
                 "source":       action.source.value,
-                "device_id":    action.device_id or "",
                 "command":      action.command or "",
                 "success":      result.success,
                 "latency_ms":   Decimal(str(round(result.latency_ms, 2))),
                 "rule_id":      action.rule_id or "",
                 "audit_expiry": ttl,
             }
+            # Only include device_id when it's a real non-empty value.
+            # An empty string causes the UI to render a blank device name.
+            if action.device_id:
+                item["device_id"] = action.device_id
             if result.error:
                 item["error"] = result.error
             await async_execute(table.put_item, Item=item)
