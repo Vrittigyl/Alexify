@@ -93,6 +93,7 @@ from schemas.enums import ActionType, ImpactLevel, RouteDecision
 from schemas.websocket import WSEventType, WSMessage
 from schemas.onboarding import OnboardingPayload, PreviewResponse, CompleteResponse
 from services.onboarding_service import OnboardingService
+from services.bootstrap_engine import BootstrapEngine
 
 logger = logging.getLogger("saathi")
 
@@ -246,6 +247,22 @@ cmd_bus    = DeviceCommandBus()
 # The _rate_tracker dict now persists across all requests on this pod.
 # broadcast_fn is injected per-request via plan(..., broadcast_fn=fn).
 action_planner = ActionPlanner()
+
+# ── Bootstrap engine — per-request injection of pipeline_fn ────────────────
+# Instantiated lazily on first use via _get_bootstrap_engine()
+_bootstrap_engine: BootstrapEngine | None = None
+
+def _get_bootstrap_engine() -> BootstrapEngine:
+    global _bootstrap_engine
+    if _bootstrap_engine is None:
+        # pipeline_fn is a forward reference resolved at call time
+        # run_full_pipeline is defined later in this module
+        import sys
+        main_module = sys.modules[__name__]
+        _bootstrap_engine = BootstrapEngine(
+            pipeline_fn=lambda event: main_module.run_full_pipeline(event)
+        )
+    return _bootstrap_engine
 
 # Load promoted patterns for RTE Stage2
 _promoted_cache: list[dict] = []
@@ -699,6 +716,227 @@ async def onboarding_complete(payload: OnboardingPayload):
     except Exception as e:
         logger.exception("Onboarding complete failed")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Bootstrap ─────────────────────────────────────────────────
+
+@app.post("/bootstrap/{household_id}", tags=["Bootstrap"])
+async def bootstrap_household(
+    household_id: str,
+    days_of_history: int = 35,
+    live_event_days: int = 3,
+    events_per_day: int = 5,
+):
+    """
+    Phase 12B — Household Learning Bootstrap Engine.
+
+    Reads the newly onboarded household from DynamoDB, generates realistic
+    historical intelligence (patterns, rules, events), and feeds it through
+    the real SAATHI pipeline. Zero hardcoded data — all derived from the
+    household's graph nodes.
+
+    Parameters:
+      days_of_history  — observation days to simulate for pattern confidence (default 35)
+      live_event_days  — recent days to replay through the live pipeline (default 3)
+      events_per_day   — events per live day (default 5)
+
+    Returns a summary of what was learned and promoted.
+    """
+    engine = _get_bootstrap_engine()
+    try:
+        summary = await engine.run(
+            household_id=household_id,
+            days_of_history=days_of_history,
+            live_event_days=live_event_days,
+            events_per_day=events_per_day,
+        )
+        return summary
+    except RuntimeError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except Exception as exc:
+        logger.exception(f"Bootstrap failed for {household_id}")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.get("/bootstrap/{household_id}/status", tags=["Bootstrap"])
+async def bootstrap_status(household_id: str):
+    """
+    Check the status of a running or completed bootstrap job.
+    Returns 404 if no bootstrap has been run for this household.
+    """
+    engine = _get_bootstrap_engine()
+    status = engine.get_status(household_id)
+    if status is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No bootstrap job found for {household_id}. Run POST /bootstrap/{household_id} first.",
+        )
+    return status
+
+
+# ── Household deletion ────────────────────────────────────────
+
+@app.delete("/household/{household_id}", tags=["Household"])
+async def delete_household(household_id: str):
+    """
+    Permanently delete all data for a household across every DynamoDB table.
+
+    Deletes from:
+      - HouseholdGraph    (PK = HOUSEHOLD#{household_id})
+      - HouseholdPatterns (household_id = household_id)
+      - HouseholdRules    (household_id = household_id)
+      - ActionLog         (household_id-index GSI)
+      - RTEAuditLog       (household_id-index GSI)
+      - HouseholdMetrics  (PK = household_id)
+
+    After calling this endpoint, the user must go through onboarding again.
+    This action is irreversible.
+    """
+    from boto3.dynamodb.conditions import Key as DKey
+    from graph_repository import _decimal_to_native
+    import asyncio
+
+    deleted: dict[str, int] = {}
+
+    # ── 1. HouseholdGraph ─────────────────────────────────────────────────
+    # Single partition key HOUSEHOLD#{household_id} — query then batch delete
+    try:
+        graph_table = get_table("household_graph")
+        pk = f"HOUSEHOLD#{household_id}"
+        items_to_delete = []
+        kwargs: dict = {"KeyConditionExpression": DKey("PK").eq(pk), "ProjectionExpression": "PK, SK"}
+        while True:
+            resp = graph_table.query(**kwargs)
+            items_to_delete.extend(resp.get("Items", []))
+            if not resp.get("LastEvaluatedKey"):
+                break
+            kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+        with graph_table.batch_writer() as bw:
+            for item in items_to_delete:
+                bw.delete_item(Key={"PK": item["PK"], "SK": item["SK"]})
+        deleted["household_graph"] = len(items_to_delete)
+        # Evict from in-memory cache
+        graph_repo.invalidate_cache(household_id)
+    except Exception as exc:
+        logger.warning(f"Delete: HouseholdGraph error for {household_id}: {exc}")
+        deleted["household_graph"] = -1
+
+    # ── 2. HouseholdPatterns ──────────────────────────────────────────────
+    try:
+        pat_table = get_table("household_patterns")
+        items: list[dict] = []
+        kwargs2: dict = {"KeyConditionExpression": DKey("household_id").eq(household_id), "ProjectionExpression": "household_id, pattern_id"}
+        while True:
+            resp = pat_table.query(**kwargs2)
+            items.extend(resp.get("Items", []))
+            if not resp.get("LastEvaluatedKey"):
+                break
+            kwargs2["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+        with pat_table.batch_writer() as bw:
+            for item in items:
+                bw.delete_item(Key={"household_id": item["household_id"], "pattern_id": item["pattern_id"]})
+        deleted["household_patterns"] = len(items)
+    except Exception as exc:
+        logger.warning(f"Delete: HouseholdPatterns error for {household_id}: {exc}")
+        deleted["household_patterns"] = -1
+
+    # ── 3. HouseholdRules ─────────────────────────────────────────────────
+    try:
+        rules_table = get_table("household_rules")
+        items3: list[dict] = []
+        kwargs3: dict = {"KeyConditionExpression": DKey("household_id").eq(household_id), "ProjectionExpression": "household_id, rule_id"}
+        while True:
+            resp = rules_table.query(**kwargs3)
+            items3.extend(resp.get("Items", []))
+            if not resp.get("LastEvaluatedKey"):
+                break
+            kwargs3["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+        with rules_table.batch_writer() as bw:
+            for item in items3:
+                bw.delete_item(Key={"household_id": item["household_id"], "rule_id": item["rule_id"]})
+        deleted["household_rules"] = len(items3)
+    except Exception as exc:
+        logger.warning(f"Delete: HouseholdRules error for {household_id}: {exc}")
+        deleted["household_rules"] = -1
+
+    # ── 4. ActionLog (household_id-index GSI) ─────────────────────────────
+    try:
+        action_table = get_table("action_log")
+        items4: list[dict] = []
+        kwargs4: dict = {
+            "IndexName": "household_id-index",
+            "KeyConditionExpression": DKey("household_id").eq(household_id),
+            "ProjectionExpression": "action_id, created_at",
+        }
+        while True:
+            resp = action_table.query(**kwargs4)
+            items4.extend(resp.get("Items", []))
+            if not resp.get("LastEvaluatedKey"):
+                break
+            kwargs4["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+        with action_table.batch_writer() as bw:
+            for item in items4:
+                key: dict = {"action_id": item["action_id"]}
+                if "created_at" in item:
+                    key["created_at"] = item["created_at"]
+                bw.delete_item(Key=key)
+        deleted["action_log"] = len(items4)
+    except Exception as exc:
+        logger.warning(f"Delete: ActionLog error for {household_id}: {exc}")
+        deleted["action_log"] = -1
+
+    # ── 5. RTEAuditLog (household_id-index GSI) ───────────────────────────
+    try:
+        rte_table = get_table("rte_audit_log")
+        items5: list[dict] = []
+        kwargs5: dict = {
+            "IndexName": "household_id-index",
+            "KeyConditionExpression": DKey("household_id").eq(household_id),
+            "ProjectionExpression": "event_id, #ts",
+            "ExpressionAttributeNames": {"#ts": "timestamp"},
+        }
+        while True:
+            resp = rte_table.query(**kwargs5)
+            items5.extend(resp.get("Items", []))
+            if not resp.get("LastEvaluatedKey"):
+                break
+            kwargs5["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+        with rte_table.batch_writer() as bw:
+            for item in items5:
+                bw.delete_item(Key={"event_id": item["event_id"], "timestamp": item["timestamp"]})
+        deleted["rte_audit_log"] = len(items5)
+    except Exception as exc:
+        logger.warning(f"Delete: RTEAuditLog error for {household_id}: {exc}")
+        deleted["rte_audit_log"] = -1
+
+    # ── 6. HouseholdMetrics ───────────────────────────────────────────────
+    try:
+        metrics_table = get_table("household_metrics")
+        items6: list[dict] = []
+        kwargs6: dict = {"KeyConditionExpression": DKey("household_id").eq(household_id), "ProjectionExpression": "household_id, #dt", "ExpressionAttributeNames": {"#dt": "date"}}
+        while True:
+            resp = metrics_table.query(**kwargs6)
+            items6.extend(resp.get("Items", []))
+            if not resp.get("LastEvaluatedKey"):
+                break
+            kwargs6["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+        with metrics_table.batch_writer() as bw:
+            for item in items6:
+                bw.delete_item(Key={"household_id": item["household_id"], "date": item["date"]})
+        deleted["household_metrics"] = len(items6)
+    except Exception as exc:
+        logger.warning(f"Delete: HouseholdMetrics error for {household_id}: {exc}")
+        deleted["household_metrics"] = -1
+
+    total_deleted = sum(v for v in deleted.values() if v >= 0)
+    logger.info(f"Household deleted: {household_id} — {total_deleted} items removed across {len(deleted)} tables")
+
+    return {
+        "household_id": household_id,
+        "status": "deleted",
+        "items_deleted": deleted,
+        "total": total_deleted,
+    }
 
 
 # ── Events ───────────────────────────────────────────────────
