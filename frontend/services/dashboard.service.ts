@@ -624,6 +624,52 @@ function mockReasoning(): ReasoningEntry[] {
   ];
 }
 
+// ─── Honest empty-state builders ─────────────────────────────────────────────
+// Used for REAL households when the backend is unreachable. Never show Sharma
+// demo data on a real household — show an honest "no data yet" state instead.
+// (Sharma mock data is reserved exclusively for the /demo route.)
+
+function emptyLearning(): LearningProgress {
+  return {
+    overallPct: 0,
+    daysLearning: 0,
+    patternsFound: 0,
+    patternsPromoted: 0,
+    missingInsights: [],
+    byMember: [],
+  };
+}
+
+function emptySnapshot(): HouseholdSnapshot {
+  return {
+    membersHome: 0,
+    membersAway: 0,
+    nextEvent: "No data yet",
+    waterTankStatus: "Status unknown",
+    nextMedicationTime: "No medications scheduled",
+    currentMoodEstimate: "No events yet",
+  };
+}
+
+function emptyMemory(): HouseholdMemory {
+  return {
+    weekSummary: "No household activity recorded yet.",
+    entries: [],
+    generatedAt: new Date().toISOString(),
+  };
+}
+
+function emptyHealth(household: MockHousehold): HealthSummary {
+  return {
+    medicationAdherence: 0,
+    routineConsistency: 0,
+    missedReminders: 0,
+    elderCareScore: 0,
+    medications: household.medications ?? [],
+    conditions: [],
+  };
+}
+
 // ─── Real API → Dashboard type adapters ──────────────────────────────────────
 
 /**
@@ -1494,7 +1540,7 @@ export const dashboardService = {
       ? patternsAndMetricsToLearning(patterns.patterns, metrics)
       : metrics
       ? metricsToLearning(metrics)
-      : mockLearning();
+      : (householdId === "hh_xk92p_sharma" ? mockLearning() : emptyLearning());
 
     // HouseholdSnapshot — REAL from /metrics + graph + patterns + actions (Phase 10)
     const snapshot: HouseholdSnapshot = metrics
@@ -1504,7 +1550,7 @@ export const dashboardService = {
           actions?.actions ?? [],
           fullGraph,
         )
-      : mockSnapshot();
+      : (householdId === "hh_xk92p_sharma" ? mockSnapshot() : emptySnapshot());
 
     // DeviceOverview — REAL from /graph/{hh}/devices (enriches mock list)
     let deviceList: MockDevice[] = [];
@@ -1528,24 +1574,24 @@ export const dashboardService = {
     const memory: HouseholdMemory =
       patterns && metrics
         ? deriveHouseholdMemory(patterns.patterns, metrics)
-        : mockMemory();
+        : (householdId === "hh_xk92p_sharma" ? mockMemory() : emptyMemory());
 
     // LearnedToday — DERIVED from /patterns
     const learnedToday: LearnedItem[] = patterns
       ? deriveLearnedToday(patterns.patterns)
-      : mockLearnedToday();
+      : (householdId === "hh_xk92p_sharma" ? mockLearnedToday() : []);
 
     // Observations — DERIVED from /patterns + /metrics
     const observations: Observation[] =
       patterns && metrics
         ? deriveObservations(patterns.patterns, metrics)
-        : mockObservations();
+        : (householdId === "hh_xk92p_sharma" ? mockObservations() : []);
 
     // RecommendedActions — DERIVED from /patterns + /metrics
     const actions_data: RecommendedAction[] =
       patterns && metrics
         ? deriveRecommendedActions(patterns.patterns, metrics)
-        : mockActions();
+        : (householdId === "hh_xk92p_sharma" ? mockActions() : []);
 
     // RecentEvents — REAL from /actions/history (Phase 8)
     const events: MockActivity[] = actions?.actions
@@ -1558,7 +1604,7 @@ export const dashboardService = {
         ? rteAuditToReasoning(rteAudit.decisions, rules.rules)
         : patterns && rules
         ? patternsAndRulesToReasoning(patterns.patterns, rules.rules)
-        : mockReasoning();
+        : (householdId === "hh_xk92p_sharma" ? mockReasoning() : []);
 
     // HouseholdHealth — DERIVED from /patterns (Phase 8: no more hardcoded scores)
     // Build a minimal household-like object from fullGraph so health doesn't use Sharma data
@@ -1572,14 +1618,14 @@ export const dashboardService = {
 
     const health: HealthSummary = patterns
       ? patternsToHealth(patterns.patterns, householdForHealth)
-      : mockHealth(householdForHealth);
+      : (householdId === "hh_xk92p_sharma" ? mockHealth(householdForHealth) : emptyHealth(householdForHealth));
 
     // HouseholdGraph — REAL from /graph/{hh}/full, or built from onboarding
     const graph: HouseholdGraph = hasGraphMembers
       ? fullGraphToHouseholdGraph(fullGraph!, householdForHealth)
       : onboardingState?.members?.length
       ? onboardingStateToGraph(onboardingState)
-      : mockGraph(SHARMA_HOUSEHOLD);
+      : (householdId === "hh_xk92p_sharma" ? mockGraph(SHARMA_HOUSEHOLD) : { members: [] });
 
     // IntelligenceStats — REAL from /metrics
     const intelligenceStats = metrics
@@ -1597,11 +1643,11 @@ export const dashboardService = {
     const d: DashboardData = {
       source: backendReachable ? "backend" : "mock",
       household: {
-        ...SHARMA_HOUSEHOLD,
+        ...householdForHealth,
         id: householdId,
         familyName,
         city,
-        memberCount: graph.members.length || onboardingState?.members?.length || SHARMA_HOUSEHOLD.memberCount,
+        memberCount: graph.members.length || onboardingState?.members?.length || householdForHealth.memberCount,
       },
       graph,
       fullGraph,
@@ -1640,136 +1686,6 @@ export const dashboardService = {
 
     _cached = d;
     return d;
-  },
-
-  // ── Individual getters ─────────────────────────────────────────────────────
-
-  async getLearningProgress(): Promise<LearningProgress> {
-    try {
-      const [pr, mr] = await Promise.all([
-        get<BackendPatternsResponse>(`${BACKEND_BASE}/patterns`),
-        get<BackendMetrics>(`${BACKEND_BASE}/metrics`),
-      ]);
-      return patternsAndMetricsToLearning(pr.patterns, mr);
-    } catch {
-      return mockLearning();
-    }
-  },
-
-  async getHouseholdSnapshot(): Promise<HouseholdSnapshot> {
-    try {
-      const [mr, pr, ar, gr] = await Promise.allSettled([
-        get<BackendMetrics>(`${BACKEND_BASE}/metrics`),
-        get<BackendPatternsResponse>(`${BACKEND_BASE}/patterns`),
-        get<BackendActionsResponse>(`${BACKEND_BASE}/actions/history?limit=10`),
-        get<BackendFullGraphResponse>(`${BACKEND_BASE}/graph/${_cached?.household.id ?? "hh_xk92p_sharma"}/full`),
-      ]);
-      const m = mr.status === "fulfilled" ? mr.value : null;
-      if (!m) return mockSnapshot();
-      return metricsAndDataToSnapshot(
-        m,
-        pr.status === "fulfilled" ? pr.value.patterns : [],
-        ar.status === "fulfilled" ? ar.value.actions : [],
-        gr.status === "fulfilled" ? gr.value : null,
-      );
-    } catch {
-      return mockSnapshot();
-    }
-  },
-
-  async getLearnedToday(): Promise<LearnedItem[]> {
-    try {
-      const r = await get<BackendPatternsResponse>(`${BACKEND_BASE}/patterns`);
-      return deriveLearnedToday(r.patterns);
-    } catch {
-      return mockLearnedToday();
-    }
-  },
-
-  async getReasoningLogs(): Promise<ReasoningEntry[]> {
-    try {
-      const [pr, rr] = await Promise.all([
-        get<BackendPatternsResponse>(`${BACKEND_BASE}/patterns`),
-        get<BackendRulesResponse>(`${BACKEND_BASE}/rules`),
-      ]);
-      return patternsAndRulesToReasoning(pr.patterns, rr.rules);
-    } catch {
-      return mockReasoning();
-    }
-  },
-
-  async getGraph(): Promise<HouseholdGraph> {
-    return mockGraph(SHARMA_HOUSEHOLD);
-  },
-
-  async getHouseholdMemory(): Promise<HouseholdMemory> {
-    try {
-      const [pr, mr] = await Promise.all([
-        get<BackendPatternsResponse>(`${BACKEND_BASE}/patterns`),
-        get<BackendMetrics>(`${BACKEND_BASE}/metrics`),
-      ]);
-      return deriveHouseholdMemory(pr.patterns, mr);
-    } catch {
-      return mockMemory();
-    }
-  },
-
-  async getObservations(): Promise<Observation[]> {
-    try {
-      const [pr, mr] = await Promise.all([
-        get<BackendPatternsResponse>(`${BACKEND_BASE}/patterns`),
-        get<BackendMetrics>(`${BACKEND_BASE}/metrics`),
-      ]);
-      return deriveObservations(pr.patterns, mr);
-    } catch {
-      return mockObservations();
-    }
-  },
-
-  async getActions(): Promise<RecommendedAction[]> {
-    try {
-      const [pr, mr] = await Promise.all([
-        get<BackendPatternsResponse>(`${BACKEND_BASE}/patterns`),
-        get<BackendMetrics>(`${BACKEND_BASE}/metrics`),
-      ]);
-      return deriveRecommendedActions(pr.patterns, mr);
-    } catch {
-      return mockActions();
-    }
-  },
-
-  async getEvents(): Promise<MockActivity[]> {
-    try {
-      const r = await get<BackendActionsResponse>(`${BACKEND_BASE}/actions/history?limit=30`);
-      return actionsToEvents(r.actions);
-    } catch {
-      return SHARMA_ACTIVITY;
-    }
-  },
-
-  async getActionHistory(): Promise<MockActivity[]> {
-    return dashboardService.getEvents();
-  },
-
-  async getRteAudit(): Promise<ReasoningEntry[]> {
-    try {
-      const [ar, rr] = await Promise.all([
-        get<BackendRTEAuditResponse>(`${BACKEND_BASE}/rte/audit?limit=20`),
-        get<BackendRulesResponse>(`${BACKEND_BASE}/rules`),
-      ]);
-      return rteAuditToReasoning(ar.decisions, rr.rules);
-    } catch {
-      return mockReasoning();
-    }
-  },
-
-  async getHealthSummary(): Promise<HealthSummary> {
-    try {
-      const r = await get<BackendPatternsResponse>(`${BACKEND_BASE}/patterns`);
-      return patternsToHealth(r.patterns, SHARMA_HOUSEHOLD);
-    } catch {
-      return mockHealth(SHARMA_HOUSEHOLD);
-    }
   },
 };
 
