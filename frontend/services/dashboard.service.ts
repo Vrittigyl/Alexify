@@ -301,6 +301,8 @@ export interface BackendGraphEdge {
 
 export interface BackendFullGraphResponse {
   household_id: string;
+  family_name?: string;
+  location?: string;
   node_count: number;
   edge_count: number;
   nodes: BackendGraphNode[];
@@ -797,7 +799,7 @@ function patternsToLearnedToday(patterns: BackendPattern[]): LearnedItem[] {
     .sort((a, b) => b.confidence - a.confidence)
     .slice(0, 4);
 
-  if (learning.length === 0) return mockLearnedToday();
+  if (learning.length === 0) return [];
 
   return learning.map((p, i) => {
     const memberName = p.member_id
@@ -829,7 +831,7 @@ function patternsAndRulesToReasoning(
 ): ReasoningEntry[] {
   const promoted = patterns.filter((p) => p.confidence_band === "PROMOTED" && p.confidence > 0);
 
-  if (promoted.length === 0) return mockReasoning();
+  if (promoted.length === 0) return [];
 
   const entries: ReasoningEntry[] = promoted.slice(0, 5).map((p, i) => {
     const ruleId = p.promoted_rule_id;
@@ -959,11 +961,7 @@ function patternsAndMetricsToLearning(
     missingInsights: missingInsights.length > 0 ? missingInsights : [
       "Still building baseline for some members",
     ],
-    byMember: byMember.length > 0 ? byMember : [
-      { name: "Dadaji", pct: 95 }, { name: "Sunita", pct: 91 },
-      { name: "Dadiji", pct: 78 }, { name: "Rohan", pct: 72 },
-      { name: "Rajesh", pct: 68 }, { name: "Ananya", pct: 51 },
-    ],
+    byMember: byMember,
   };
 }
 
@@ -994,10 +992,10 @@ function patternsToHealth(
     ? Math.round(activePatterns.reduce((sum, p) => sum + p.confidence, 0) / activePatterns.length * 100)
     : 87;
 
-  const elderPatterns = patterns.filter((p) => p.member_id === "mbr_dadaji_001");
+  const elderPatterns = patterns.filter((p) => p.member_id && p.member_id.includes("grandparent"));
   const elderCareScore = elderPatterns.length > 0
     ? Math.round(elderPatterns.reduce((sum, p) => sum + p.confidence, 0) / elderPatterns.length * 100)
-    : 91;
+    : 100;
 
   const missedReminders = patterns.filter(
     (p) => (p.consecutive_misses ?? 0) > 0 &&
@@ -1026,7 +1024,7 @@ function patternsToHealth(
  * Phase 10: preserves target_members, device_id, command, channel, latency_ms.
  */
 function actionsToEvents(backendActions: BackendAction[]): MockActivity[] {
-  if (backendActions.length === 0) return SHARMA_ACTIVITY;
+  if (backendActions.length === 0) return [];
 
   // Member ID → display name lookup
   const MEMBER_NAMES: Record<string, string> = {
@@ -1108,7 +1106,7 @@ function rteAuditToReasoning(
   decisions: BackendRTEDecision[],
   rules: BackendRule[],
 ): ReasoningEntry[] {
-  if (decisions.length === 0) return mockReasoning();
+  if (decisions.length === 0) return [];
 
   return decisions.slice(0, 8).map((d, i): ReasoningEntry => {
     const rule = d.rule_matched ? rules.find((r) => r.rule_id === d.rule_matched) : null;
@@ -1266,18 +1264,18 @@ export const dashboardService = {
     return d;
   },
 
-  async load(forceRefresh = false): Promise<DashboardData> {
-    if (_cached && !forceRefresh) return _cached;
+  async load(householdId: string = "hh_xk92p_sharma", forceRefresh = false): Promise<DashboardData> {
+    if (_cached && !forceRefresh && _cached.household.id === householdId) return _cached;
 
     // ── 1. Fetch everything in parallel — each call is independent ──────────
     const [metricsResult, patternsResult, rulesResult, devicesResult, actionsResult, rteAuditResult, fullGraphResult] = await Promise.allSettled([
-      get<BackendMetrics>(`${BACKEND_BASE}/metrics`),
-      get<BackendPatternsResponse>(`${BACKEND_BASE}/patterns`),
-      get<BackendRulesResponse>(`${BACKEND_BASE}/rules`),
-      get<BackendDevicesResponse>(`${BACKEND_BASE}/graph/hh_xk92p_sharma/devices`),
-      get<BackendActionsResponse>(`${BACKEND_BASE}/actions/history?limit=30`),
-      get<BackendRTEAuditResponse>(`${BACKEND_BASE}/rte/audit?limit=20`),
-      get<BackendFullGraphResponse>(`${BACKEND_BASE}/graph/hh_xk92p_sharma/full`),
+      get<BackendMetrics>(`${BACKEND_BASE}/metrics?household_id=${householdId}`),
+      get<BackendPatternsResponse>(`${BACKEND_BASE}/patterns?household_id=${householdId}`),
+      get<BackendRulesResponse>(`${BACKEND_BASE}/rules?household_id=${householdId}`),
+      get<BackendDevicesResponse>(`${BACKEND_BASE}/graph/${householdId}/devices`),
+      get<BackendActionsResponse>(`${BACKEND_BASE}/actions/history?limit=30&household_id=${householdId}`),
+      get<BackendRTEAuditResponse>(`${BACKEND_BASE}/rte/audit?limit=20&household_id=${householdId}`),
+      get<BackendFullGraphResponse>(`${BACKEND_BASE}/graph/${householdId}/full`),
     ]);
 
     const metrics    = metricsResult.status    === "fulfilled" ? metricsResult.value    : null;
@@ -1310,9 +1308,33 @@ export const dashboardService = {
       : mockSnapshot();
 
     // DeviceOverview — REAL from /graph/{hh}/devices (enriches mock list)
-    const deviceList: MockDevice[] = devices
-      ? devicesToMockDevices(devices)
-      : SHARMA_DEVICES;
+    let deviceList: MockDevice[] = [];
+    if (householdId === "hh_xk92p_sharma") {
+      deviceList = devices ? devicesToMockDevices(devices) : SHARMA_DEVICES;
+    } else if (fullGraph) {
+      deviceList = fullGraph.nodes
+        .filter((n) => n.node_type === "device")
+        .map((n, i) => {
+          // find primary user from edges
+          const primaryUserEdge = fullGraph.edges.find((e) => e.to === n.id && e.type === "PRIMARY_USER_OF");
+          let primaryUserName = "Member";
+          if (primaryUserEdge) {
+            const userNode = fullGraph.nodes.find((mn) => mn.id === primaryUserEdge.from);
+            if (userNode) primaryUserName = userNode.name ?? userNode.id;
+          }
+          return {
+            id: n.id,
+            name: n.name ?? n.id,
+            type: (n.device_type ?? "other") as any,
+            room: (n.room as string) ?? "Room",
+            emoji: "🔌",
+            status: "standby",
+            primaryUser: primaryUserEdge?.from ?? "",
+            primaryUserName,
+            lastActivity: "Recently added",
+          };
+        });
+    }
 
     // HouseholdMemory — DERIVED from /patterns + /metrics
     const memory: HouseholdMemory =
@@ -1340,7 +1362,7 @@ export const dashboardService = {
     // RecentEvents — REAL from /actions/history (Phase 8)
     const events: MockActivity[] = actions?.actions
       ? actionsToEvents(actions.actions)
-      : SHARMA_ACTIVITY;
+      : (householdId === "hh_xk92p_sharma" ? SHARMA_ACTIVITY : []);
 
     // ReasoningFeed — REAL from /rte/audit + /rules (Phase 8)
     const reasoning: ReasoningEntry[] =
@@ -1367,7 +1389,12 @@ export const dashboardService = {
 
     const d: DashboardData = {
       source: backendReachable ? "backend" : "mock",
-      household: SHARMA_HOUSEHOLD,
+      household: { 
+        ...SHARMA_HOUSEHOLD, 
+        id: householdId,
+        familyName: fullGraph?.family_name || SHARMA_HOUSEHOLD.familyName,
+        city: fullGraph?.location || SHARMA_HOUSEHOLD.city,
+      },
       graph,
       fullGraph,
       rawPatterns: patterns?.patterns ?? [],
@@ -1383,13 +1410,24 @@ export const dashboardService = {
       // FamilyPresence — no live presence endpoint exists.
       // Always use mockPresence but mark it clearly as not live.
       // The component will show a "no live presence data" banner.
-      presence: { ...mockPresence(SHARMA_HOUSEHOLD), isLive: false },
+      presence: { 
+        home: graph.members as unknown as typeof SHARMA_HOUSEHOLD.members,
+        away: [],
+        currentActivity: [],
+        isLive: false 
+      },
       snapshot,
       devices: deviceList,
-      routines: SHARMA_ROUTINES,
-      predictions: SHARMA_PREDICTIONS,
+      routines: householdId === "hh_xk92p_sharma" ? SHARMA_ROUTINES : [],
+      predictions: householdId === "hh_xk92p_sharma" ? SHARMA_PREDICTIONS : [],
       intelligenceStats,
-      notificationStats: NOTIFICATION_STATS,
+      notificationStats: householdId === "hh_xk92p_sharma" ? NOTIFICATION_STATS : {
+        totalSent: 0,
+        byChannel: { mobile_push: 0, alexa_voice: 0, smart_display: 0, sms: 0 },
+        byCategory: { health: 0, routine: 0, safety: 0, system: 0 },
+        acknowledgementRate: 100,
+        averageDelayMs: 0
+      },
     };
 
     _cached = d;
@@ -1529,10 +1567,10 @@ export const dashboardService = {
 
 // ─── Full mock assembler (used by getMocks() and as fallback) ─────────────────
 
-function buildAllMock(): DashboardData {
+function buildBaseData(householdId: string): DashboardData {
   return {
     source: "mock",
-    household: SHARMA_HOUSEHOLD,
+    household: { ...SHARMA_HOUSEHOLD, id: householdId },
     graph: mockGraph(SHARMA_HOUSEHOLD),
     memory: mockMemory(),
     learnedToday: mockLearnedToday(),

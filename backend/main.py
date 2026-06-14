@@ -91,6 +91,9 @@ from schemas import NormalizedEvent
 from schemas.actions import Action, Notification
 from schemas.enums import ActionType, ImpactLevel, RouteDecision
 from schemas.websocket import WSEventType, WSMessage
+from schemas.onboarding import OnboardingPayload, PreviewResponse, CompleteResponse
+from services.onboarding_service import OnboardingService
+
 logger = logging.getLogger("saathi")
 
 HH_ID = settings.household_id
@@ -626,6 +629,78 @@ async def seed_database():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ── Onboarding ───────────────────────────────────────────────
+
+@app.post("/onboarding/preview", tags=["Onboarding"], response_model=PreviewResponse)
+async def onboarding_preview(payload: OnboardingPayload):
+    """
+    Validate onboarding payload and preview generated graph nodes and edges.
+    Does NOT write to DynamoDB.
+    """
+    svc = OnboardingService()
+    # Use a dummy ID for preview
+    graph_data = svc.build_graph("preview_hh_id", payload)
+    
+    # Format graph nodes and edges for response
+    graph_nodes = []
+    for n in graph_data["nodes"]:
+        node_id = n.get("node_id", "")
+        node_type = n.get("node_type", "")
+        name = n.get("name", n.get("description", node_id))
+        attrs = {k: v for k, v in n.items() if k not in ("node_id", "node_type", "name", "description")}
+        graph_nodes.append({
+            "node_id": node_id,
+            "node_type": node_type,
+            "name": name,
+            "attributes": attrs
+        })
+        
+    graph_edges = []
+    for e in graph_data["edges"]:
+        from_node = e.get("from", "")
+        edge_type = e.get("type", "")
+        to_node = e.get("to", "")
+        attrs = {k: v for k, v in e.items() if k not in ("from", "type", "to")}
+        graph_edges.append({
+            "from_node": from_node,
+            "edge_type": edge_type,
+            "to_node": to_node,
+            "attributes": attrs
+        })
+
+    return PreviewResponse(
+        valid=True,
+        household_summary={
+            "name": payload.household_name,
+            "city": payload.household_city,
+            "members_count": len(payload.members),
+            "devices_count": len(payload.devices),
+            "routines_count": len(payload.routines),
+        },
+        graph_nodes=graph_nodes,
+        graph_edges=graph_edges,
+        warnings=[]
+    )
+
+
+@app.post("/onboarding/complete", tags=["Onboarding"], response_model=CompleteResponse)
+async def onboarding_complete(payload: OnboardingPayload):
+    """
+    Finalize onboarding: convert payload into graph data and write to DynamoDB.
+    """
+    import uuid
+    # Generate a random household ID
+    new_hh_id = f"hh_{uuid.uuid4().hex[:8]}"
+    
+    svc = OnboardingService()
+    try:
+        summary = svc.create_household(new_hh_id, payload)
+        return CompleteResponse(**summary)
+    except Exception as e:
+        logger.exception("Onboarding complete failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ── Events ───────────────────────────────────────────────────
 
 class RawEventRequest(BaseModel):
@@ -720,9 +795,11 @@ async def run_full_demo():
 # ── Metrics ──────────────────────────────────────────────────
 
 @app.get("/metrics", tags=["Metrics"])
-async def get_metrics():
+async def get_metrics(household_id: str | None = None):
     """Return full DashboardMetrics snapshot."""
-    m = metrics.get_dashboard_metrics()
+    hid = household_id or HH_ID
+    from services.metrics_service import MetricsService
+    m = MetricsService(hid).get_dashboard_metrics()
     return m.model_dump(mode="json")
 
 
@@ -772,8 +849,11 @@ async def get_devices(household_id: str):
 # ── Rules ────────────────────────────────────────────────────
 
 @app.get("/rules", tags=["Rules"])
-async def get_rules():
+async def get_rules(household_id: str | None = None):
     """List all active rules in the registry."""
+    hid = household_id or HH_ID
+    # Since rule_engine is a singleton, it needs to load rules for this HH
+    rule_engine._registry.load(hid)
     rules = rule_engine._registry._raw_rules
     return {
         "count": len(rules),
@@ -790,20 +870,22 @@ async def get_rules():
 
 
 @app.post("/rules/reload", tags=["Rules"])
-async def reload_rules():
+async def reload_rules(household_id: str | None = None):
     """Force-refresh the rule registry from DynamoDB."""
+    hid = household_id or HH_ID
     # Clear cache timestamp so load() fetches fresh data
     rule_engine._registry._last_load = 0.0
-    rule_engine._registry.load(HH_ID)
+    rule_engine._registry.load(hid)
     return {"status": "ok", "rules_loaded": len(rule_engine._registry._raw_rules)}
 
 
 # ── Patterns ─────────────────────────────────────────────────
 
 @app.get("/patterns", tags=["Patterns"])
-async def get_patterns():
+async def get_patterns(household_id: str | None = None):
     """Return all patterns with full fields for the intelligence layer."""
-    patterns = graph_repo.get_patterns(HH_ID)
+    hid = household_id or HH_ID
+    patterns = graph_repo.get_patterns(hid)
     return {
         "count": len(patterns),
         "patterns": [
@@ -832,16 +914,17 @@ async def get_patterns():
 
 
 @app.post("/patterns/promote", tags=["Patterns"])
-async def run_promotion():
+async def run_promotion(household_id: str | None = None):
     """Scan all patterns and promote eligible ones."""
-    newly_promoted = pattern_engine.promote_if_eligible(HH_ID)
+    hid = household_id or HH_ID
+    newly_promoted = pattern_engine.promote_if_eligible(hid)
     return {"status": "ok", "newly_promoted": newly_promoted}
 
 
 # ── Action History ────────────────────────────────────────────
 
 @app.get("/actions/history", tags=["Actions"])
-async def get_action_history(limit: int = 50):
+async def get_action_history(limit: int = 50, household_id: str | None = None):
     """
     Return recent actions from the ActionLog table, newest first.
     Used by the frontend RecentEvents component to replace static mocks.
@@ -852,13 +935,14 @@ async def get_action_history(limit: int = 50):
     - We query via household_id-index (GSI), sort by created_at descending.
     - Items that lack created_at fall through via a Scan fallback.
     """
+    hid = household_id or HH_ID
     from boto3.dynamodb.conditions import Key as DKey
     from graph_repository import _decimal_to_native
     table = get_table("action_log")
     try:
         resp = table.query(
             IndexName="household_id-index",
-            KeyConditionExpression=DKey("household_id").eq(HH_ID),
+            KeyConditionExpression=DKey("household_id").eq(hid),
             ScanIndexForward=False,   # newest first
             Limit=limit,
         )
@@ -870,7 +954,7 @@ async def get_action_history(limit: int = 50):
                 a["created_at"] = a["timestamp"]
         # Sort by created_at descending (strings in ISO format sort correctly)
         actions.sort(key=lambda x: x.get("created_at", ""), reverse=True)
-        return {"household_id": HH_ID, "count": len(actions), "actions": actions}
+        return {"household_id": hid, "count": len(actions), "actions": actions}
     except Exception as e:
         logger.warning(f"ActionLog query failed: {e}")
         return {"household_id": HH_ID, "count": 0, "actions": [], "error": str(e)}
@@ -968,6 +1052,8 @@ async def get_full_graph(household_id: str):
             })
         return {
             "household_id": household_id,
+            "family_name": g.graph.get("family_name", "Unknown"),
+            "location": g.graph.get("location", "Unknown"),
             "node_count": len(nodes),
             "edge_count": len(edges),
             "nodes": nodes,

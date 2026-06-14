@@ -320,14 +320,8 @@ export function deriveHouseholdMemory(
     });
   }
 
-  // Ensure at least 4 entries
-  if (entries.length < 4) {
-    entries.push({ text: "Water usage remained within normal household baseline.", sentiment: "neutral" });
-    entries.push({ text: "No safety incidents detected this week.", sentiment: "positive" });
-  }
-
   return {
-    weekSummary: `This has been a ${promoted.length >= 2 ? "consistent" : "steady"} week for the Sharma household.`,
+    weekSummary: entries.length > 0 ? `This has been a ${promoted.length >= 2 ? "consistent" : "steady"} week for the household.` : "SAATHI is learning about your household. Check back later for a summary.",
     entries: entries.slice(0, 7),
     generatedAt: new Date().toISOString(),
   };
@@ -552,16 +546,8 @@ export function deriveRecommendedActions(
     });
   }
 
-  // Pending medication (always include — driven by medication data)
-  actions.push({
-    id: "action_medication",
-    title: "Dadaji evening medication",
-    reason: "Telmisartan 40mg due at 8:30 PM. Pattern active 47 days — reminder queued.",
-    priority: "high" as const,
-    category: "health" as const,
-    affectedMember: "Dadaji",
-    dueBy: "8:30 PM today",
-  });
+  // Medication logic should be dynamically driven by pending events
+  // Removing hardcoded Dadaji reminder for cold-started households
 
   // If bedrock fired today, suggest reviewing the AI decision
   if (metrics.bedrock_calls > 0) {

@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
 import { Sparkles, ArrowRight, Home, Users, Cpu, Clock } from "lucide-react";
 import { Button } from "@/components/ui/Button";
-import { useOnboardingStore } from "@/lib/onboarding-store";
+import { onboardingStore, useOnboardingStore } from "@/lib/onboarding-store";
 
 // Simulated intelligence insights built from user's data
 function buildInsights(state: ReturnType<typeof useOnboardingStore>) {
@@ -114,6 +114,53 @@ export function Step9Reveal() {
   const insights = buildInsights(state);
 
   useEffect(() => {
+    async function callBackend() {
+      const currentState = onboardingStore.getState();
+      try {
+        const payload = {
+          household_name: currentState.householdName,
+          household_city: currentState.householdCity,
+          members: currentState.members.map(m => ({
+            id: m.id,
+            name: m.name,
+            role: m.role,
+            age_group: m.ageGroup,
+            care_needs: currentState.careNeeds.find(c => c.memberId === m.id)?.needs || []
+          })),
+          devices: currentState.devices.map(d => ({
+            id: d.id,
+            name: d.name,
+            device_type: d.type,
+            room: d.room
+          })),
+          routines: currentState.routines.filter(r => r.selected).map(r => ({
+            id: r.id,
+            label: r.label,
+            time: r.time || null
+          })),
+          priorities: currentState.priorities
+        };
+
+        const res = await fetch("http://localhost:8000/onboarding/complete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          onboardingStore.setHouseholdId(data.household_id);
+          console.log("Onboarding complete, graph created:", data);
+        } else {
+          console.error("Backend onboarding failed", await res.text());
+        }
+      } catch (err) {
+        console.error("Error communicating with backend", err);
+      }
+    }
+    
+    callBackend();
+
     let step = 0;
     const interval = setInterval(() => {
       step += 1;

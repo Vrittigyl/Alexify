@@ -97,6 +97,8 @@ class GraphRepository:
 
             if sk.startswith("META#"):
                 graph.graph["version"] = item.get("graph_version", 1)
+                graph.graph["family_name"] = item.get("family_name", "Unknown")
+                graph.graph["location"] = item.get("location", "Unknown")
 
             elif sk.startswith("NODE#"):
                 node_id = item["node_id"]

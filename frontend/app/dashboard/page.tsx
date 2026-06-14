@@ -16,15 +16,20 @@ const REFRESH_DEBOUNCE_MS = 2000;
 export default function DashboardPage() {
   const [data, setData]           = useState<DashboardData | null>(null);
   const [onboarding, setOnboarding] = useState<OnboardingState | null>(null);
+  const [hhId, setHhId] = useState<string>(HH_ID);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── WebSocket connection ───────────────────────────────────────────────────
-  const { connected, lastEvent } = useHouseholdSocket(HH_ID);
+  const { connected, lastEvent } = useHouseholdSocket(hhId);
 
   // ── Initial load ──────────────────────────────────────────────────────────
   useEffect(() => {
-    dashboardService.load().then(setData);
     const state = onboardingStore.getState();
+    const currentHhId = state.householdId || HH_ID;
+    setHhId(currentHhId);
+    
+    dashboardService.load(currentHhId).then(setData);
+    
     setOnboarding(state);
     return onboardingStore.subscribe((s) => setOnboarding(s));
   }, []);
@@ -51,7 +56,7 @@ export default function DashboardPage() {
     if (refreshTimer.current) clearTimeout(refreshTimer.current);
     refreshTimer.current = setTimeout(async () => {
       dashboardService.clearCache();
-      const fresh = await dashboardService.load(true);
+      const fresh = await dashboardService.load(hhId, true);
       setData(fresh);
     }, REFRESH_DEBOUNCE_MS);
 
